@@ -1,0 +1,62 @@
+/* Painel flutuante, no canto superior direito.
+   position: fixed = fica preso a janela, nao rola junto com a pagina. */
+#mlmetrics-painel {
+  position: fixed;
+  top: 90px;
+  right: 16px;
+
+  /* z-index alto para ficar por cima dos elementos do ML.
+     O site usa valores na casa dos milhares, entao usamos bem mais. */
+  z-index: 999999;
+
+  width: 220px;
+  padding: 12px 14px;
+  border-radius: 10px;
+
+  background: #3483fa;  /* o azul do proprio Mercado Livre */
+  color: #ffffff;
+
+  /* Repetimos a fonte explicitamente: o painel esta dentro da pagina do ML
+     e herdaria os estilos dele se nao definissemos os nossos. */
+  font-family: "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+#mlmetrics-painel .mlmetrics-titulo {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+#mlmetrics-painel .mlmetrics-linha {
+  font-variant-numeric: tabular-nums;  /* numeros com largura fixa, alinham melhor */
+}
+
+#mlmetrics-painel .mlmetrics-status {
+  margin-top: 8px;
+  opacity: 0.8;
+  font-size: 11px;
+}
+
+/* Aviso temporario mostrado pelo coletor nas telas de vendedor.
+   Fica embaixo para nao disputar espaco com o painel, que fica em cima. */
+#mlmetrics-aviso {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999999;
+
+  padding: 10px 16px;
+  border-radius: 8px;
+
+  background: #00a650;  /* verde do ML - sinaliza sucesso */
+  color: #ffffff;
+
+  font-family: "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 13px;
+
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
