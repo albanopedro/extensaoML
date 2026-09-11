@@ -39,6 +39,17 @@
     vendas: ["venda", "vendido"]
   };
 
+  // Identificadores de anuncio do Mercado Livre.
+  //
+  // A letra opcional depois de "MLB" faz parte do codigo, nao e ruido:
+  // "MLBU5098517614" e "MLB5098517614" sao identificadores diferentes.
+  // Capturamos prefixo e digitos separados e remontamos sem o hifen.
+  //
+  //   MLB-3456789012   ->  MLB3456789012    anuncio
+  //   MLB12345678      ->  MLB12345678      produto de catalogo (/p/)
+  //   MLBU5098517614   ->  MLBU5098517614   estrutura nova (/up/)
+  const PADRAO_CODIGO = /(MLB[A-Z]?)-?(\d{6,})/;
+
   // --------------------------------------------------------------------------
   // Utilitarios de leitura
   // --------------------------------------------------------------------------
@@ -174,9 +185,9 @@
     // Caso mais facil: a propria URL da pagina ja identifica o anuncio.
     // Vale quando estamos na tela de metricas de UM anuncio especifico -
     // ali a pagina inteira fala de um produto so, entao o limite e o body.
-    const naUrl = window.location.href.match(/MLB-?(\d{6,})/);
+    const naUrl = window.location.href.match(PADRAO_CODIGO);
     if (naUrl) {
-      return { codigo: "MLB" + naUrl[1], limite: document.body };
+      return { codigo: naUrl[1] + naUrl[2], limite: document.body };
     }
 
     let atual = elemento;
@@ -223,10 +234,10 @@
     const encontrados = [];
 
     for (let i = 0; i < links.length; i++) {
-      const achado = links[i].getAttribute("href").match(/MLB-?(\d{6,})/);
+      const achado = links[i].getAttribute("href").match(PADRAO_CODIGO);
       if (!achado) continue;
 
-      const codigo = "MLB" + achado[1];
+      const codigo = achado[1] + achado[2];
 
       // O mesmo anuncio costuma ter varios links no card (a foto, o titulo,
       // o botao). Contam como um so - por isso guardamos apenas os distintos.
@@ -504,9 +515,50 @@
   // Ponto de entrada
   // --------------------------------------------------------------------------
 
+  /**
+   * Diz se estamos numa pagina de compra - a vitrine publica do produto.
+   *
+   * O coletor NAO deve agir aqui, e a razao vale a pena entender.
+   *
+   * Essa pagina mistura metricas de dois donos diferentes:
+   *
+   *   "1 vendido"        -> do ANUNCIO
+   *   "+1.000 vendas"    -> do VENDEDOR (reputacao dele na plataforma)
+   *
+   * As duas usam as mesmas palavras e ficam na mesma pagina, entao nao ha
+   * como distinguir pelo texto. E como a URL identifica um anuncio, tudo
+   * que fosse lido aqui seria atribuido a ele - inclusive o numero que e
+   * do vendedor. Foi exatamente assim que um anuncio com uma venda passou
+   * a exibir mil.
+   *
+   * O coletor existe para as telas de vendedor, onde cada numero pertence
+   * ao anuncio do seu card. Aqui a extensao so exibe, nunca captura.
+   *
+   * Detectamos pelos botoes de compra, que sao o que define esta pagina.
+   * Usamos textContent em vez de innerText de proposito: innerText calcula
+   * o layout da pagina inteira, o que seria caro para rodar a cada varredura.
+   *
+   * @returns {boolean}
+   */
+  function ehPaginaDeCompra() {
+    const texto = document.body.textContent.toLowerCase();
+
+    return texto.indexOf("adicionar ao carrinho") !== -1 ||
+           texto.indexOf("comprar agora") !== -1;
+  }
+
+  /**
+   * Varre e guarda, se este for um lugar de onde se deve coletar.
+   */
+  function coletar() {
+    if (ehPaginaDeCompra()) return;
+
+    salvar(varrerPagina());
+  }
+
   // Varre uma vez de imediato: se a pagina ja veio pronta do servidor,
   // os numeros estao la e nao ha o que esperar.
-  salvar(varrerPagina());
+  coletar();
 
   // Mas telas de vendedor costumam montar a lista por JavaScript, depois
   // do carregamento. Em vez de apostar num tempo fixo ("espera 1,5s e
@@ -521,9 +573,7 @@
     // 600ms depois que as mudancas pararem.
     clearTimeout(agendado);
 
-    agendado = setTimeout(function () {
-      salvar(varrerPagina());
-    }, 600);
+    agendado = setTimeout(coletar, 600);
   });
 
   observador.observe(document.body, {

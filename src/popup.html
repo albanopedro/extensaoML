@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>ML Metrics</title>
+  <style>
+    /* Popup tem tamanho livre: o navegador se ajusta ao conteudo, mas
+       sem largura definida ele fica estreito demais. */
+    body {
+      width: 300px;
+      margin: 0;
+      padding: 16px;
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 13px;
+      color: #333;
+    }
+
+    h1 {
+      font-size: 15px;
+      margin: 0 0 12px;
+      color: #3483fa;
+    }
+
+    #resumo {
+      background: #f5f5f5;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      line-height: 1.5;
+    }
+
+    #lista {
+      max-height: 180px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+    }
+
+    .item {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 5px 0;
+      border-bottom: 1px solid #eee;
+      font-size: 12px;
+    }
+
+    .item .codigo { color: #666; }
+    .item .numeros { font-weight: 600; white-space: nowrap; }
+
+    button {
+      width: 100%;
+      padding: 9px;
+      margin-bottom: 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .principal { background: #3483fa; color: #fff; }
+    .secundario { background: #ededed; color: #333; }
+    .perigo { background: #fff; color: #d93025; border: 1px solid #d93025; }
+
+    #aviso {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #00a650;
+      text-align: center;
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>ML Metrics</h1>
+
+<div id="resumo">Carregando...</div>
+
+<div id="lista"></div>
+
+<button id="copiar" class="secundario">Copiar diagnóstico</button>
+<button id="limpar" class="perigo">Limpar dados guardados</button>
+
+<div id="aviso"></div>
+
+<script src="popup.js"></script>
+</body>
+</html>

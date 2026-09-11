@@ -17,22 +17,33 @@
   const PREFIXO = "mlmetrics";
   const CHAVE_CACHE = "mlmetrics_dados";
 
+  // Identificadores de anuncio do Mercado Livre.
+  //
+  // Existem varios formatos, e a letra opcional depois de "MLB" faz parte
+  // do codigo - NAO e ruido a ser descartado. "MLBU5098517614" e
+  // "MLB5098517614" sao identificadores diferentes, de espacos distintos.
+  // Por isso capturamos o prefixo e os digitos em grupos separados e
+  // remontamos: o unico caractere que sumiu e o hifen.
+  //
+  //   MLB-3456789012   ->  MLB3456789012    anuncio (produto.mercadolivre)
+  //   MLB12345678      ->  MLB12345678      produto de catalogo (/p/)
+  //   MLBU5098517614   ->  MLBU5098517614   estrutura nova (/up/)
+  const PADRAO_CODIGO = /(MLB[A-Z]?)-?(\d{6,})/;
+
   // --------------------------------------------------------------------------
   // Leitura
   // --------------------------------------------------------------------------
 
   /**
-   * Extrai o codigo do anuncio (ex: "MLB3456789012") a partir da URL.
-   *
-   * O ML usa dois formatos, com e sem hifen depois de "MLB":
-   *   produto.mercadolivre.com.br/MLB-3456789012-titulo-_JM
-   *   www.mercadolivre.com.br/titulo/p/MLB12345678
+   * Extrai o codigo do anuncio a partir da URL.
    *
    * @returns {string|null} null se nao for pagina de anuncio
    */
   function extrairCodigoAnuncio() {
-    const match = window.location.href.match(/MLB-?(\d{6,})/);
-    return match ? "MLB" + match[1] : null;
+    const match = window.location.href.match(PADRAO_CODIGO);
+
+    // match[1] e o prefixo ("MLB" ou "MLBU"), match[2] sao os digitos.
+    return match ? match[1] + match[2] : null;
   }
 
   /**

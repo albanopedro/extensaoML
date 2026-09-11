@@ -7,6 +7,11 @@
 
   "permissions": ["storage"],
 
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "ML Metrics"
+  },
+
   "content_scripts": [
     {
       "matches": ["https://*.mercadolivre.com.br/*", "file:///*"],
