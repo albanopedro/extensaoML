@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Anuncio de teste - Capa Frontal Extrusora</title>
+
+  <!-- Dado estruturado, igual ao que o Mercado Livre publica para buscadores.
+       E daqui que o content.js le o preco (fonte 1, a mais confiavel). -->
+  <meta itemprop="price" content="319.90">
+
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; background: #ededed; padding: 24px; }
+    .produto { background: #fff; border-radius: 6px; padding: 24px; max-width: 620px; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    .preco { font-size: 32px; font-weight: 300; }
+    .gabarito { background: #fffbe6; border-left: 4px solid #f5c518; padding: 12px; margin-bottom: 20px; max-width: 620px; }
+    code { background: #eee; padding: 1px 4px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<div class="gabarito">
+  <strong>Esperado no painel azul (canto superior direito):</strong><br>
+  Visitas <code>359</code> &middot; Vendas <code>50</code> &middot;
+  Conversão <code>13.9%</code> &middot; Vende a cada <code>7 visitas</code> &middot;
+  Receita <code>R$ 15.995,00</code><br>
+  <small>
+    Abra <code>publicacoes.html</code> ANTES deste arquivo — é de lá que vem o cache.
+    Se abrir este primeiro, o painel avisa que não há dados, o que também é o
+    comportamento correto.
+  </small>
+</div>
+
+<div class="produto">
+  <h1>Capa Frontal Extrusora Original Creality K2 Plus</h1>
+
+  <!-- A classe imita o componente real de preco do ML.
+       Serve para exercitar a fonte 2 do lerPreco(), o plano B:
+       basta remover a tag <meta> la de cima para ver o fallback agir. -->
+  <div class="preco">
+    R$ <span class="andes-money-amount__fraction">319</span>,90
+  </div>
+</div>
+
+</body>
+</html>

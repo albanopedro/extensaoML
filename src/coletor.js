@@ -27,6 +27,18 @@
   // sem sair varrendo a pagina inteira.
   const MAX_NIVEIS = 12;
 
+  // Metricas que sabemos capturar, e as palavras que as denunciam no texto.
+  //
+  // Sao varias palavras por metrica porque o ML nao e consistente: a mesma
+  // informacao aparece como "vendas", "vendidos" ou "vendas concretizadas"
+  // dependendo da tela. Repare que "vendido" NAO contem "venda" - por isso
+  // precisam ser termos separados, e nao um prefixo curto como "vend"
+  // (que pegaria "Vender um igual" e sujaria o resultado).
+  const ROTULOS = {
+    visitas: ["visita"],
+    vendas: ["venda", "vendido"]
+  };
+
   // --------------------------------------------------------------------------
   // Utilitarios de leitura
   // --------------------------------------------------------------------------
@@ -183,26 +195,33 @@
     while (no) {
       // Comparamos em minusculo para pegar "Visitas", "visitas", "VISITAS".
       const texto = (no.nodeValue || "").toLowerCase();
+      const elemento = no.parentElement;
 
-      // indexOf(...) !== -1 significa "contem". Usamos "visita" no singular
-      // para casar tambem com "visitas" e "visitantes".
-      if (texto.indexOf("visita") !== -1) {
-        const elemento = no.parentElement;
+      if (elemento) {
+        // Para cada metrica que conhecemos, testamos todas as palavras
+        // que podem indica-la neste texto.
+        Object.keys(ROTULOS).forEach(function (metrica) {
+          ROTULOS[metrica].forEach(function (palavra) {
+            // indexOf(...) !== -1 significa "contem".
+            if (texto.indexOf(palavra) === -1) return;
 
-        if (elemento) {
-          const codigo = acharCodigoAnuncio(elemento);
-          const visitas = valorDoRotulo(elemento, "visita");
+            const codigo = acharCodigoAnuncio(elemento);
+            const valor = valorDoRotulo(elemento, palavra);
 
-          // So guardamos se temos as duas pontas: de qual anuncio e quantas.
-          if (codigo && visitas !== null) {
-            // Se o mesmo anuncio aparecer duas vezes, ficamos com o maior
-            // valor. Telas costumam mostrar recortes ("visitas hoje" e
-            // "visitas totais") e o total e o que interessa.
-            if (!resultado[codigo] || visitas > resultado[codigo].visitas) {
-              resultado[codigo] = { visitas: visitas };
+            // So guardamos com as duas pontas: de qual anuncio, e quanto.
+            if (!codigo || valor === null) return;
+
+            if (!resultado[codigo]) resultado[codigo] = {};
+
+            // Ficamos com o MAIOR valor encontrado na pagina para cada
+            // metrica. Telas costumam mostrar recortes lado a lado
+            // ("visitas hoje" e "visitas totais") e o total e o que interessa.
+            const atual = resultado[codigo][metrica];
+            if (atual === undefined || valor > atual) {
+              resultado[codigo][metrica] = valor;
             }
-          }
-        }
+          });
+        });
       }
 
       no = caminhante.nextNode();
@@ -233,12 +252,22 @@
       const cache = guardado[CHAVE_CACHE] || {};
 
       codigos.forEach(function (codigo) {
-        cache[codigo] = {
-          visitas: novos[codigo].visitas,
-          // Data da captura. Na Etapa 5 isso permite avisar
-          // "dado de 3 dias atras" em vez de mostrar numero velho como novo.
+        // Object.assign copia da esquerda para a direita, entao o que vem
+        // depois vence. A ordem importa e diz a regra de atualizacao:
+        //
+        //   cache[codigo]  -> o que ja sabiamos deste anuncio
+        //   novos[codigo]  -> o que esta tela mostrou agora (mais recente)
+        //
+        // Assim uma tela que so mostra visitas ATUALIZA as visitas sem
+        // apagar as vendas capturadas em outra tela. E entre a captura
+        // velha e a nova vence a NOVA, nao a maior: dentro de uma mesma
+        // pagina o maior valor e o total, mas entre dias diferentes o
+        // numero recente e o correto, mesmo que seja menor.
+        cache[codigo] = Object.assign({}, cache[codigo], novos[codigo], {
+          // Data da captura. Permite exibir "dado de 3 dias atras"
+          // em vez de mostrar numero velho como se fosse de agora.
           capturadoEm: Date.now()
-        };
+        });
       });
 
       chrome.storage.local.set({ [CHAVE_CACHE]: cache }, function () {

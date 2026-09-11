@@ -31,14 +31,47 @@
   margin-bottom: 8px;
 }
 
+/* Cada linha e rotulo a esquerda, valor a direita.
+   justify-content: space-between empurra um para cada ponta. */
 #mlmetrics-painel .mlmetrics-linha {
-  font-variant-numeric: tabular-nums;  /* numeros com largura fixa, alinham melhor */
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+
+  padding: 5px 0;
+
+  /* Divisoria sutil entre as metricas. rgba com alfa baixo funciona melhor
+     que uma cor fixa: adapta ao fundo sem precisar calcular tom. */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* A ultima linha nao precisa de divisoria embaixo. */
+#mlmetrics-painel .mlmetrics-linha:last-of-type {
+  border-bottom: none;
+}
+
+#mlmetrics-painel .mlmetrics-rotulo {
+  opacity: 0.85;
+  font-size: 12px;
+}
+
+#mlmetrics-painel .mlmetrics-valor {
+  font-weight: 700;
+
+  /* tabular-nums da a todos os digitos a mesma largura, entao os valores
+     ficam alinhados verticalmente em vez de dancar conforme o numero. */
+  font-variant-numeric: tabular-nums;
+
+  /* Impede que "R$ 1.234,00" quebre em duas linhas. */
+  white-space: nowrap;
 }
 
 #mlmetrics-painel .mlmetrics-status {
-  margin-top: 8px;
-  opacity: 0.8;
+  margin-top: 10px;
+  opacity: 0.75;
   font-size: 11px;
+  line-height: 1.35;
 }
 
 /* Aviso temporario mostrado pelo coletor nas telas de vendedor.
