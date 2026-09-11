@@ -24,7 +24,9 @@
   <code>MLB2222222222 = 1234</code> &nbsp;
   <code>MLB3333333333 = 87</code><br>
   O caso 4 <strong>nao</strong> deve aparecer (nao tem essa metrica).<br>
-  O caso 5 deve dar <code>4200</code>, e nao 15 (o coletor fica com o maior valor).
+  O caso 5 deve dar <code>4200</code>, e nao 15 (o coletor fica com o maior valor).<br>
+  O caso 6 <strong>nao</strong> deve aparecer (a palavra esta em prosa, nao e rotulo).<br>
+  Total: <strong>4 anuncios</strong> capturados.
 </div>
 
 <!-- ========================================================================
@@ -84,6 +86,23 @@
   <div>
     <span class="valor">4.200</span> <span class="rotulo">visitas totais</span>
   </div>
+</div>
+
+<!-- ========================================================================
+     CASO 6 - CONTROLE NEGATIVO: a palavra aparece em PROSA, nao como rotulo
+     Este card nao tem metrica nenhuma, so um texto explicativo que por acaso
+     menciona "visitas". Dois enganos poderiam acontecer aqui:
+
+       a) pegar o "12" da frase, que e prazo e nao metrica
+       b) subir alem do card e herdar o 359 do primeiro anuncio
+
+     O (a) e barrado pela regra de proximidade (ha palavras entre o numero
+     e o rotulo). O (b) e barrado pelo limite do card.
+     ===================================================================== -->
+<div class="card">
+  <h2><a href="https://www.mercadolivre.com.br/anuncio/MLB-6666666666-fonte-24v">Fonte 24V 350W</a></h2>
+  <span>Estoque: 3 unidades</span>
+  <p>Anuncio pausado ha 12 dias. Ao reativar, as visitas voltam a ser contadas.</p>
 </div>
 
 </body>

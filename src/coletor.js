@@ -86,15 +86,78 @@
     const posicao = texto.toLowerCase().indexOf(palavra);
     if (posicao === -1) return null;
 
-    // Recorta so o trecho anterior ao rotulo e procura numeros nele.
-    const antes = texto.slice(0, posicao);
+    // Primeiro tentamos antes do rotulo, que e a ordem natural em portugues.
+    const antes = ultimoNumeroColado(texto.slice(0, posicao));
+    if (antes !== null) return antes;
 
-    // \d[\d.]* = um digito seguido de mais digitos ou pontos.
-    // O "g" faz encontrar TODAS as ocorrencias, nao so a primeira.
-    const numeros = antes.match(/\d[\d.]*/g);
-    if (!numeros) return null;
+    // Se nao achou, tentamos depois - cobre "Visitas: 359".
+    //
+    // Antes disso removemos as letras que sobraram da propria palavra: o
+    // rotulo procurado e "visita", mas o texto diz "visitas", entao o "s"
+    // ficaria no caminho e seria lido como palavra estranha.
+    const depois = texto
+      .slice(posicao + palavra.length)
+      .replace(/^[a-zA-ZÀ-ú]+/, "");
 
-    return paraInteiro(numeros[numeros.length - 1]);
+    return primeiroNumeroColado(depois);
+  }
+
+  /**
+   * Ultimo numero de um trecho, DESDE QUE ele esteja colado no fim.
+   *
+   * "Colado" aqui significa: entre o numero e o fim do trecho so pode haver
+   * espaco e pontuacao, nunca letras. E o que separa rotulo de prosa:
+   *
+   *   "359 visitas"                          -> vao " "        vale
+   *   "1.234\n   visitas"                    -> vao branco     vale
+   *   "R$ 15.995,00Os rotulos... 'visitas'"  -> vao com texto  NAO vale
+   *
+   * Sem esta regra, a funcao atravessa frases inteiras atras de um numero
+   * qualquer e cola ele no rotulo errado. Foi assim que uma legenda acabou
+   * virando metrica de anuncio.
+   *
+   * @param {string} trecho
+   * @returns {number|null}
+   */
+  function ultimoNumeroColado(trecho) {
+    // matchAll devolve cada ocorrencia COM a posicao onde ela comeca -
+    // e a posicao que permite medir o vao ate o rotulo.
+    const numeros = Array.from(trecho.matchAll(/\d[\d.]*/g));
+    if (numeros.length === 0) return null;
+
+    const ultimo = numeros[numeros.length - 1];
+    const vao = trecho.slice(ultimo.index + ultimo[0].length);
+
+    if (temLetra(vao)) return null;
+
+    return paraInteiro(ultimo[0]);
+  }
+
+  /**
+   * Primeiro numero de um trecho, DESDE QUE colado no comeco.
+   * Mesma regra do anterior, na direcao oposta.
+   *
+   * @param {string} trecho
+   * @returns {number|null}
+   */
+  function primeiroNumeroColado(trecho) {
+    const encontrado = trecho.match(/\d[\d.]*/);
+    if (!encontrado) return null;
+
+    const vao = trecho.slice(0, encontrado.index);
+
+    if (temLetra(vao)) return null;
+
+    return paraInteiro(encontrado[0]);
+  }
+
+  /**
+   * Diz se ha alguma letra no texto. O intervalo À-ú cobre os acentos
+   * do portugues, senao "visitas nos últimos" passaria como se nao
+   * tivesse letras entre o numero e o rotulo.
+   */
+  function temLetra(texto) {
+    return /[a-zA-ZÀ-ú]/.test(texto);
   }
 
   /**
@@ -107,11 +170,14 @@
    * @param {Element} elemento ponto de partida
    * @returns {string|null}
    */
-  function acharCodigoAnuncio(elemento) {
+  function contextoDoAnuncio(elemento) {
     // Caso mais facil: a propria URL da pagina ja identifica o anuncio.
-    // Vale quando estamos na tela de metricas de UM anuncio especifico.
+    // Vale quando estamos na tela de metricas de UM anuncio especifico -
+    // ali a pagina inteira fala de um produto so, entao o limite e o body.
     const naUrl = window.location.href.match(/MLB-?(\d{6,})/);
-    if (naUrl) return "MLB" + naUrl[1];
+    if (naUrl) {
+      return { codigo: "MLB" + naUrl[1], limite: document.body };
+    }
 
     let atual = elemento;
 
@@ -122,7 +188,13 @@
         const codigos = codigosDentroDe(atual);
 
         // Exatamente um anuncio aqui dentro: nao ha ambiguidade, e dele.
-        if (codigos.length === 1) return codigos[0];
+        // Este elemento tambem vira o LIMITE da busca pelo valor: tudo que
+        // pertence a este anuncio esta aqui dentro, e o que esta fora e de
+        // outro. Amarrar as duas buscas na mesma fronteira impede que um
+        // anuncio herde o numero do vizinho.
+        if (codigos.length === 1) {
+          return { codigo: codigos[0], limite: atual };
+        }
 
         // Mais de um: subimos demais e ja estamos num container que
         // abraca varios cards. O rotulo que disparou a busca pertence a
@@ -186,14 +258,19 @@
    * @param {string} palavra
    * @returns {number|null}
    */
-  function valorDoRotulo(elemento, palavra) {
+  function valorDoRotulo(elemento, palavra, limite) {
     let atual = elemento;
 
-    // 5 niveis cobrem as estruturas aninhadas que vimos sem chegar
-    // ao card do anuncio vizinho.
+    // Subimos no maximo ate o LIMITE - o elemento que delimita este anuncio.
+    // Sem essa trava, um rotulo em card sem numero faria a busca continuar
+    // subindo e encontrar o numero do anuncio de baixo.
     for (let nivel = 0; nivel < 5 && atual; nivel++) {
       const valor = numeroAntesDe(atual.textContent, palavra);
       if (valor !== null) return valor;
+
+      // Chegamos na fronteira do anuncio: daqui para cima ja e territorio
+      // de outro, entao paramos mesmo sem ter achado nada.
+      if (atual === limite) return null;
 
       atual = atual.parentElement;
     }
@@ -247,11 +324,14 @@
             // indexOf(...) !== -1 significa "contem".
             if (texto.indexOf(palavra) === -1) return;
 
-            const codigo = acharCodigoAnuncio(elemento);
-            const valor = valorDoRotulo(elemento, palavra);
+            const contexto = contextoDoAnuncio(elemento);
+            if (!contexto) return;
+
+            const codigo = contexto.codigo;
+            const valor = valorDoRotulo(elemento, palavra, contexto.limite);
 
             // So guardamos com as duas pontas: de qual anuncio, e quanto.
-            if (!codigo || valor === null) return;
+            if (valor === null) return;
 
             if (!resultado[codigo]) resultado[codigo] = {};
 
@@ -269,7 +349,50 @@
       no = caminhante.nextNode();
     }
 
-    return resultado;
+    return descartarImplausiveis(resultado);
+  }
+
+  /**
+   * Remove leituras que nao podem ser verdade.
+   *
+   * Regra: e impossivel vender mais vezes do que o anuncio foi visitado -
+   * toda venda passa por uma visita. Quando isso acontece, o problema nao e
+   * um numero ruim, e a LEITURA INTEIRA que interpretou errado: pegou dois
+   * numeros quaisquer da tela e colou nos rotulos errados. Por isso
+   * descartamos o anuncio todo, nao so a metrica maior.
+   *
+   * Isto e uma rede de protecao contra o risco central desta abordagem.
+   * Como identificamos metricas por palavras no texto, qualquer frase da
+   * pagina que contenha "visitas" ou "vendas" pode ser lida como dado - um
+   * texto de ajuda, uma avaliacao de comprador, um aviso do proprio site.
+   * Nao da para prever todas essas frases, mas da para reconhecer quando o
+   * resultado e impossivel.
+   *
+   * @param {Object} resultado
+   * @returns {Object} so os anuncios cujos numeros fazem sentido
+   */
+  function descartarImplausiveis(resultado) {
+    const limpo = {};
+
+    Object.keys(resultado).forEach(function (codigo) {
+      const dados = resultado[codigo];
+
+      // So da para checar quando temos as duas metricas. Com uma so,
+      // aceitamos - nao ha com o que comparar.
+      const comparavel = (dados.visitas !== undefined && dados.vendas !== undefined);
+
+      if (comparavel && dados.vendas > dados.visitas) {
+        console.warn(
+          "[ML METRICS] leitura descartada em " + codigo +
+          ": " + dados.vendas + " vendas para " + dados.visitas + " visitas"
+        );
+        return;
+      }
+
+      limpo[codigo] = dados;
+    });
+
+    return limpo;
   }
 
   // --------------------------------------------------------------------------
