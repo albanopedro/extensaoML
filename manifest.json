@@ -9,7 +9,7 @@
 
   "content_scripts": [
     {
-      "matches": ["https://*.mercadolivre.com.br/*"],
+      "matches": ["https://*.mercadolivre.com.br/*", "file:///*"],
       "js": ["src/coletor.js", "src/content.js"],
       "css": ["src/content.css"],
       "run_at": "document_idle"

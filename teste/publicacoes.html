@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Banco de teste - coletor ML Metrics</title>
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; background: #ededed; padding: 24px; }
+    h1 { font-size: 18px; }
+    .card { background: #fff; border-radius: 6px; padding: 16px; margin-bottom: 14px; }
+    .card h2 { font-size: 14px; margin: 0 0 4px; }
+    .rotulo { color: #999; font-size: 12px; }
+    .valor { font-size: 20px; font-weight: 700; }
+    .gabarito { background: #fffbe6; border-left: 4px solid #f5c518; padding: 12px; margin-bottom: 20px; }
+    code { background: #eee; padding: 1px 4px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<h1>Banco de teste do coletor</h1>
+
+<div class="gabarito">
+  <strong>Resultado esperado no console:</strong><br>
+  <code>MLB1111111111 = 359</code> &nbsp;
+  <code>MLB2222222222 = 1234</code> &nbsp;
+  <code>MLB3333333333 = 87</code><br>
+  O caso 4 <strong>nao</strong> deve aparecer (nao tem essa metrica).<br>
+  O caso 5 deve dar <code>4200</code>, e nao 15 (o coletor fica com o maior valor).
+</div>
+
+<!-- ========================================================================
+     CASO 1 - numero e rotulo no MESMO texto
+     Formato mais comum. Exercita o caminho 1 da funcao numeroProximo().
+     ===================================================================== -->
+<div class="card">
+  <h2><a href="https://www.mercadolivre.com.br/anuncio/MLB-1111111111-capa-extrusora">Capa Frontal Extrusora</a></h2>
+  <span>359 visitas totais</span>
+</div>
+
+<!-- ========================================================================
+     CASO 2 - numero e rotulo em elementos IRMAOS, e com separador de milhar
+     Exercita o caminho 2 (irmaos) e a limpeza do ponto em "1.234".
+     ===================================================================== -->
+<div class="card">
+  <h2><a href="https://www.mercadolivre.com.br/anuncio/MLB-2222222222-bico-hotend">Bico Hotend 0.4mm</a></h2>
+  <div>
+    <span class="valor">1.234</span>
+    <span class="rotulo">visitas</span>
+  </div>
+</div>
+
+<!-- ========================================================================
+     CASO 3 - estrutura ANINHADA, numero num ramo distante do rotulo
+     Exercita o caminho 3 (subir para o pai).
+     ===================================================================== -->
+<div class="card">
+  <h2><a href="https://www.mercadolivre.com.br/anuncio/MLB-3333333333-mesa-aquecida">Mesa Aquecida</a></h2>
+  <div>
+    <div><strong class="valor">87</strong></div>
+    <div><small class="rotulo">Visitas nos ultimos 30 dias</small></div>
+  </div>
+</div>
+
+<!-- ========================================================================
+     CASO 4 - CONTROLE NEGATIVO: anuncio sem metrica de visitas
+     Serve para confirmar que o coletor nao inventa dado. Um teste que so
+     tem casos positivos nao prova que o codigo sabe dizer "nao achei".
+     ===================================================================== -->
+<div class="card">
+  <h2><a href="https://www.mercadolivre.com.br/anuncio/MLB-4444444444-correia-gt2">Correia GT2</a></h2>
+  <span>Estoque: 12 unidades</span>
+</div>
+
+<!-- ========================================================================
+     CASO 5 - o MESMO anuncio com dois recortes de metrica
+     A tela real do ML costuma mostrar "hoje" e "total" juntos. O coletor
+     deve ficar com o maior (4200), nao com o ultimo que encontrar (15).
+     ===================================================================== -->
+<div class="card">
+  <h2><a href="https://www.mercadolivre.com.br/anuncio/MLB-5555555555-extrusora-completa">Extrusora Completa</a></h2>
+  <div>
+    <span class="valor">15</span> <span class="rotulo">visitas hoje</span>
+  </div>
+  <div>
+    <span class="valor">4.200</span> <span class="rotulo">visitas totais</span>
+  </div>
+</div>
+
+</body>
+</html>

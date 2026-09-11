@@ -32,30 +32,57 @@
   // --------------------------------------------------------------------------
 
   /**
-   * Converte o primeiro numero encontrado num texto para inteiro.
+   * Converte um texto de numero brasileiro para inteiro.
    *
-   * Precisa lidar com o formato brasileiro: "1.234" significa mil duzentos
-   * e trinta e quatro, entao o ponto e separador de MILHAR e deve sumir.
-   * (Se um dia isso rodar em site que usa virgula, aqui muda.)
+   * "1.234" no Brasil significa mil duzentos e trinta e quatro: o ponto e
+   * separador de MILHAR e precisa sumir antes de converter.
    *
-   * @param {string} texto
+   * @param {string} bruto ex: "1.234"
    * @returns {number|null}
    */
-  function extrairNumero(texto) {
+  function paraInteiro(bruto) {
+    // split(".").join("") remove TODOS os pontos, nao so o primeiro.
+    const numero = parseInt(bruto.split(".").join(""), 10);
+
+    // parseInt devolve NaN quando nao consegue converter.
+    return isNaN(numero) ? null : numero;
+  }
+
+  /**
+   * Pega o numero que aparece ANTES de uma palavra no texto.
+   *
+   * Por que "antes" e nao simplesmente "o primeiro numero"?
+   * Porque em portugues o valor precede o rotulo, enquanto numeros que vem
+   * DEPOIS do rotulo costumam descrever o recorte, nao o valor:
+   *
+   *   "359 visitas totais"              -> 359 e o valor        (antes)
+   *   "Visitas nos ultimos 30 dias"     -> 30 e o periodo!      (depois)
+   *
+   * Pegar o primeiro numero do texto capturaria 30 no segundo caso, que
+   * esta errado. Exigir que venha antes elimina essa classe de engano.
+   *
+   * Quando ha varios numeros antes, ficamos com o ULTIMO - e o mais
+   * proximo do rotulo, entao o mais provavel de ser o valor dele.
+   *
+   * @param {string} texto
+   * @param {string} palavra rotulo procurado, em minusculo
+   * @returns {number|null}
+   */
+  function numeroAntesDe(texto, palavra) {
     if (!texto) return null;
 
-    // \d[\d.]* = um digito, seguido de mais digitos ou pontos.
-    const encontrado = texto.match(/(\d[\d.]*)/);
-    if (!encontrado) return null;
+    const posicao = texto.toLowerCase().indexOf(palavra);
+    if (posicao === -1) return null;
 
-    // split(".").join("") remove TODOS os pontos, nao so o primeiro.
-    const limpo = encontrado[1].split(".").join("");
-    const numero = parseInt(limpo, 10);
+    // Recorta so o trecho anterior ao rotulo e procura numeros nele.
+    const antes = texto.slice(0, posicao);
 
-    // parseInt devolve NaN quando nao consegue converter. NaN e o unico
-    // valor em JavaScript que nao e igual a si mesmo, mas usar isNaN()
-    // deixa a intencao mais clara para quem le.
-    return isNaN(numero) ? null : numero;
+    // \d[\d.]* = um digito seguido de mais digitos ou pontos.
+    // O "g" faz encontrar TODAS as ocorrencias, nao so a primeira.
+    const numeros = antes.match(/\d[\d.]*/g);
+    if (!numeros) return null;
+
+    return paraInteiro(numeros[numeros.length - 1]);
   }
 
   /**
@@ -95,37 +122,35 @@
   }
 
   /**
-   * Dado o elemento que contem a palavra "visitas", encontra o numero.
+   * Dado o elemento que contem o rotulo, encontra o valor correspondente.
    *
-   * O numero pode estar em tres lugares, do mais provavel ao menos:
-   *   1. no proprio texto      -> "359 visitas totais"
-   *   2. num elemento vizinho  -> <span>359</span><span>visitas</span>
-   *   3. no elemento pai       -> qualquer estrutura mais aninhada
+   * O numero nem sempre mora junto do rotulo. Estes tres formatos sao todos
+   * plausiveis e aparecem no banco de teste:
+   *
+   *   <span>359 visitas</span>                    -> junto
+   *   <span>1.234</span><span>visitas</span>      -> em irmaos
+   *   <div><b>87</b></div><div><small>Visitas...  -> em ramos separados
+   *
+   * A solucao para os tres e a mesma: subir no DOM. O textContent de um
+   * elemento inclui o texto de todos os descendentes, entao em algum nivel
+   * acima numero e rotulo acabam no mesmo texto - e ai numeroAntesDe()
+   * resolve. Paramos no primeiro nivel que der resposta, porque subir demais
+   * comeca a misturar dados de outros anuncios da mesma pagina.
    *
    * @param {Element} elemento
+   * @param {string} palavra
    * @returns {number|null}
    */
-  function numeroProximo(elemento) {
-    // 1) no proprio texto
-    const proprio = extrairNumero(elemento.textContent);
-    if (proprio !== null) return proprio;
+  function valorDoRotulo(elemento, palavra) {
+    let atual = elemento;
 
-    // 2) nos irmaos imediatos, antes e depois
-    const anterior = elemento.previousElementSibling;
-    if (anterior) {
-      const n = extrairNumero(anterior.textContent);
-      if (n !== null) return n;
-    }
+    // 5 niveis cobrem as estruturas aninhadas que vimos sem chegar
+    // ao card do anuncio vizinho.
+    for (let nivel = 0; nivel < 5 && atual; nivel++) {
+      const valor = numeroAntesDe(atual.textContent, palavra);
+      if (valor !== null) return valor;
 
-    const seguinte = elemento.nextElementSibling;
-    if (seguinte) {
-      const n = extrairNumero(seguinte.textContent);
-      if (n !== null) return n;
-    }
-
-    // 3) no pai - textContent do pai inclui o texto de todos os filhos
-    if (elemento.parentElement) {
-      return extrairNumero(elemento.parentElement.textContent);
+      atual = atual.parentElement;
     }
 
     return null;
@@ -166,7 +191,7 @@
 
         if (elemento) {
           const codigo = acharCodigoAnuncio(elemento);
-          const visitas = numeroProximo(elemento);
+          const visitas = valorDoRotulo(elemento, "visita");
 
           // So guardamos se temos as duas pontas: de qual anuncio e quantas.
           if (codigo && visitas !== null) {
