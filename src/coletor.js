@@ -116,21 +116,54 @@
     let atual = elemento;
 
     for (let nivel = 0; nivel < MAX_NIVEIS && atual; nivel++) {
-      // querySelector so existe em Element (nao em nos de texto),
+      // querySelectorAll so existe em Element (nao em nos de texto),
       // por isso a checagem antes de chamar.
-      if (atual.querySelector) {
-        const link = atual.querySelector('a[href*="MLB"]');
+      if (atual.querySelectorAll) {
+        const codigos = codigosDentroDe(atual);
 
-        if (link) {
-          const achado = link.getAttribute("href").match(/MLB-?(\d{6,})/);
-          if (achado) return "MLB" + achado[1];
-        }
+        // Exatamente um anuncio aqui dentro: nao ha ambiguidade, e dele.
+        if (codigos.length === 1) return codigos[0];
+
+        // Mais de um: subimos demais e ja estamos num container que
+        // abraca varios cards. O rotulo que disparou a busca pertence a
+        // UM deles, e nao temos como saber qual - entao desistimos.
+        //
+        // Desistir e melhor que chutar o primeiro: um numero atribuido ao
+        // anuncio errado e pior do que numero nenhum, porque nao tem como
+        // a vendedora perceber que esta errado.
+        if (codigos.length > 1) return null;
       }
 
       atual = atual.parentElement;
     }
 
     return null;
+  }
+
+  /**
+   * Lista os codigos de anuncio distintos que aparecem dentro de um elemento.
+   *
+   * @param {Element} elemento
+   * @returns {string[]}
+   */
+  function codigosDentroDe(elemento) {
+    const links = elemento.querySelectorAll('a[href*="MLB"]');
+    const encontrados = [];
+
+    for (let i = 0; i < links.length; i++) {
+      const achado = links[i].getAttribute("href").match(/MLB-?(\d{6,})/);
+      if (!achado) continue;
+
+      const codigo = "MLB" + achado[1];
+
+      // O mesmo anuncio costuma ter varios links no card (a foto, o titulo,
+      // o botao). Contam como um so - por isso guardamos apenas os distintos.
+      if (encontrados.indexOf(codigo) === -1) {
+        encontrados.push(codigo);
+      }
+    }
+
+    return encontrados;
   }
 
   /**
@@ -197,7 +230,16 @@
       const texto = (no.nodeValue || "").toLowerCase();
       const elemento = no.parentElement;
 
-      if (elemento) {
+      // Pulamos o que a propria extensao desenhou na tela.
+      //
+      // O painel do content.js exibe as palavras "Visitas" e "Vendas" junto
+      // dos numeros. Sem esta guarda, o coletor leria a propria saida como
+      // se fosse dado do Mercado Livre e a realimentaria no cache - um
+      // sistema se confirmando sozinho, que e a pior especie de bug porque
+      // os numeros continuam parecendo plausiveis.
+      //
+      // closest() sobe pelos ancestrais procurando quem casa com o seletor.
+      if (elemento && !elemento.closest("#mlmetrics-painel, #mlmetrics-aviso")) {
         // Para cada metrica que conhecemos, testamos todas as palavras
         // que podem indica-la neste texto.
         Object.keys(ROTULOS).forEach(function (metrica) {
@@ -235,6 +277,26 @@
   // --------------------------------------------------------------------------
 
   /**
+   * Diz se os numeros de um anuncio mudaram em relacao ao que ja tinhamos.
+   *
+   * Comparamos apenas as metricas. "capturadoEm" muda toda varredura por
+   * definicao, entao inclui-lo na comparacao faria tudo parecer sempre
+   * diferente - exatamente o que precisamos evitar.
+   *
+   * @param {Object|undefined} antigo
+   * @param {Object} novo
+   * @returns {boolean}
+   */
+  function mudou(antigo, novo) {
+    // Nunca vimos este anuncio: e novidade por definicao.
+    if (!antigo) return true;
+
+    return Object.keys(novo).some(function (metrica) {
+      return antigo[metrica] !== novo[metrica];
+    });
+  }
+
+  /**
    * Mescla o que acabamos de achar com o que ja estava guardado.
    *
    * Mesclar em vez de sobrescrever e essencial: cada tela mostra um
@@ -244,12 +306,23 @@
    * @param {Object} novos
    */
   function salvar(novos) {
-    const codigos = Object.keys(novos);
-    if (codigos.length === 0) return;
+    if (Object.keys(novos).length === 0) return;
 
     chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
       // Se for a primeira vez, nao existe nada guardado ainda.
       const cache = guardado[CHAVE_CACHE] || {};
+
+      // Ficamos so com os anuncios cujos numeros realmente mudaram.
+      //
+      // Isso e OBRIGATORIO, nao e otimizacao: o MutationObserver la embaixo
+      // dispara a cada alteracao do DOM, e mostrar o aviso verde altera o
+      // DOM. Sem esta trava, avisar provocaria nova varredura, que avisaria
+      // de novo - um loop infinito.
+      const codigos = Object.keys(novos).filter(function (codigo) {
+        return mudou(cache[codigo], novos[codigo]);
+      });
+
+      if (codigos.length === 0) return;
 
       codigos.forEach(function (codigo) {
         // Object.assign copia da esquerda para a direita, entao o que vem
@@ -308,12 +381,33 @@
   // Ponto de entrada
   // --------------------------------------------------------------------------
 
-  // Telas de vendedor costumam carregar a lista por JavaScript, um instante
-  // depois do "document_idle". Esperamos 1,5s para dar tempo dos numeros
-  // aparecerem no DOM antes de varrer.
-  // (Na Etapa 5 isso vira um MutationObserver, que e a solucao correta:
-  // reage quando o conteudo chega, em vez de apostar num tempo fixo.)
-  setTimeout(function () {
-    salvar(varrerPagina());
-  }, 1500);
+  // Varre uma vez de imediato: se a pagina ja veio pronta do servidor,
+  // os numeros estao la e nao ha o que esperar.
+  salvar(varrerPagina());
+
+  // Mas telas de vendedor costumam montar a lista por JavaScript, depois
+  // do carregamento. Em vez de apostar num tempo fixo ("espera 1,5s e
+  // torce"), observamos o DOM e reagimos quando o conteudo chega - funcione
+  // a conexao rapida ou lenta.
+  let agendado = null;
+
+  const observador = new MutationObserver(function () {
+    // DEBOUNCE: montar uma lista dispara centenas de mutacoes seguidas.
+    // Varrer a cada uma travaria a pagina. Entao cada mutacao CANCELA a
+    // varredura agendada e marca outra - o efeito e varrer uma unica vez,
+    // 600ms depois que as mudancas pararem.
+    clearTimeout(agendado);
+
+    agendado = setTimeout(function () {
+      salvar(varrerPagina());
+    }, 600);
+  });
+
+  observador.observe(document.body, {
+    childList: true,  // elementos adicionados ou removidos
+    subtree: true     // em qualquer profundidade, nao so nos filhos diretos
+    // Nao observamos "characterData" (texto alterado no lugar) de proposito:
+    // dobraria o volume de eventos para ganhar pouco, ja que o ML troca os
+    // elementos inteiros em vez de editar o texto dentro deles.
+  });
 })();

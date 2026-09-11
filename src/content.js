@@ -261,23 +261,59 @@
   // Ponto de entrada
   // --------------------------------------------------------------------------
 
-  const codigo = extrairCodigoAnuncio();
+  /**
+   * Decide o que mostrar na tela atual. Pode ser chamada quantas vezes for
+   * preciso - cada chamada substitui o painel anterior.
+   */
+  function atualizar() {
+    const codigo = extrairCodigoAnuncio();
 
-  // Nao e pagina de anuncio (home, busca, carrinho). Sai em silencio.
-  if (!codigo) return;
-
-  // chrome.storage e assincrono: devolve por callback, nao por retorno.
-  // Toda a montagem do painel acontece dentro dele, ja com o dado em maos.
-  chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
-    const cache = guardado[CHAVE_CACHE] || {};
-    const dados = cache[codigo];
-
-    if (!dados) {
-      montarPainelVazio();
+    // Saiu de uma pagina de anuncio (foi para a home, busca, carrinho).
+    // Tiramos o painel: melhor nada do que numeros de outro produto.
+    if (!codigo) {
+      const anterior = document.getElementById(PREFIXO + "-painel");
+      if (anterior) anterior.remove();
       return;
     }
 
-    const preco = lerPreco();
-    montarPainel(codigo, calcular(dados, preco), dados.capturadoEm);
-  });
+    // chrome.storage e assincrono: devolve por callback, nao por retorno.
+    // Toda a montagem do painel acontece dentro dele, ja com o dado em maos.
+    chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
+      const cache = guardado[CHAVE_CACHE] || {};
+      const dados = cache[codigo];
+
+      if (!dados) {
+        montarPainelVazio();
+        return;
+      }
+
+      montarPainel(codigo, calcular(dados, lerPreco()), dados.capturadoEm);
+    });
+  }
+
+  atualizar();
+
+  // O Mercado Livre e uma SPA: clicar de um produto para outro troca o
+  // conteudo e a URL sem recarregar a pagina. Este script nao roda de novo
+  // sozinho, entao sem isto o painel ficaria exibindo o produto anterior.
+  //
+  // Por que verificar a URL periodicamente em vez de escutar um evento?
+  // Porque nao existe evento bom para isso aqui. "popstate" so dispara no
+  // botao voltar, nao em navegacao normal. E sobrescrever history.pushState
+  // nao funciona: content scripts rodam num mundo isolado, com uma copia
+  // propria de window - a pagina continuaria usando a versao original dela.
+  //
+  // Comparar uma string uma vez por segundo custa praticamente nada, e e a
+  // solucao que nao depende de detalhe interno do site.
+  let urlAnterior = window.location.href;
+
+  setInterval(function () {
+    if (window.location.href === urlAnterior) return;
+
+    urlAnterior = window.location.href;
+
+    // Pequena espera: a URL muda antes do conteudo novo terminar de chegar,
+    // e precisamos do preco do produto NOVO, nao do que ainda esta na tela.
+    setTimeout(atualizar, 500);
+  }, 1000);
 })();
