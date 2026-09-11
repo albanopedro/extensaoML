@@ -56,6 +56,9 @@
   // Duas horas equilibra dado fresco com nao pesar na navegacao dela.
   const INTERVALO_BUSCA_MS = 2 * 60 * 60 * 1000;
 
+  // Ultima vez em que um diagnostico foi gravado (trava do salvarDiagnostico).
+  let ultimoDiagnostico = 0;
+
   // Identificadores de anuncio do Mercado Livre.
   //
   // A letra opcional depois de "MLB" faz parte do codigo, nao e ruido:
@@ -440,33 +443,50 @@
       //
       // closest() sobe pelos ancestrais procurando quem casa com o seletor.
       if (elemento && !elemento.closest("#mlmetrics-painel, #mlmetrics-aviso")) {
-        // Para cada metrica que conhecemos, testamos todas as palavras
-        // que podem indica-la neste texto.
-        Object.keys(ROTULOS).forEach(function (metrica) {
-          ROTULOS[metrica].forEach(function (palavra) {
-            // indexOf(...) !== -1 significa "contem".
-            if (texto.indexOf(palavra) === -1) return;
-
-            const contexto = contextoDoAnuncio(elemento, doc, url);
-            if (!contexto) return;
-
-            const codigo = contexto.codigo;
-            const valor = valorDoRotulo(elemento, palavra, contexto.limite, doc);
-
-            // So guardamos com as duas pontas: de qual anuncio, e quanto.
-            if (valor === null) return;
-
-            if (!resultado[codigo]) resultado[codigo] = {};
-
-            // Ficamos com o MAIOR valor encontrado na pagina para cada
-            // metrica. Telas costumam mostrar recortes lado a lado
-            // ("visitas hoje" e "visitas totais") e o total e o que interessa.
-            const atual = resultado[codigo][metrica];
-            if (atual === undefined || valor > atual) {
-              resultado[codigo][metrica] = valor;
-            }
+        // Primeiro checamos se o texto menciona ALGUMA metrica que
+        // conhecemos. So entao vale a pena a busca pelo contexto.
+        const menciona = Object.keys(ROTULOS).some(function (metrica) {
+          return ROTULOS[metrica].some(function (palavra) {
+            return texto.indexOf(palavra) !== -1;
           });
         });
+
+        if (menciona) {
+          // O contexto do anuncio (quem e, e ate onde buscar o valor) NAO
+          // depende da palavra - e do elemento. Calcula-lo dentro do laco
+          // de palavras faria cada sinonimo refazer os querySelectorAll ate
+          // 12 niveis de ancestral: na tela de listagem, com 50 cards, eram
+          // milhares de varreduras quase do documento inteiro.
+          const contexto = contextoDoAnuncio(elemento, doc, url);
+
+          if (contexto) {
+            const codigo = contexto.codigo;
+
+            // Para cada metrica que conhecemos, testamos todas as palavras
+            // que podem indica-la neste texto.
+            Object.keys(ROTULOS).forEach(function (metrica) {
+              ROTULOS[metrica].forEach(function (palavra) {
+                // indexOf(...) !== -1 significa "contem".
+                if (texto.indexOf(palavra) === -1) return;
+
+                const valor = valorDoRotulo(elemento, palavra, contexto.limite, doc);
+
+                // So guardamos com as duas pontas: de qual anuncio, e quanto.
+                if (valor === null) return;
+
+                if (!resultado[codigo]) resultado[codigo] = {};
+
+                // Ficamos com o MAIOR valor encontrado na pagina para cada
+                // metrica. Telas costumam mostrar recortes lado a lado
+                // ("visitas hoje" e "visitas totais") e o total e o que interessa.
+                const atual = resultado[codigo][metrica];
+                if (atual === undefined || valor > atual) {
+                  resultado[codigo][metrica] = valor;
+                }
+              });
+            });
+          }
+        }
       }
 
       no = caminhante.nextNode();
@@ -542,6 +562,68 @@
     });
   }
 
+  // Fila que serializa leitura+escrita do cache DESTA aba.
+  //
+  // O chrome.storage nao oferece leitura-modificacao-escrita atomica: entre
+  // o get e o set, outra operacao pode entrar e gravar por cima. Encadear
+  // tudo numa fila única impede que duas varre duras rapidas da MESMA aba se
+  // pisem - o que acontecia com o aviso verde provocando re-varredura.
+  // Entre abas DISTINTAS a corrida continua: resolver exigiria centralizar
+  // a escrita num service worker (o lote 6 da revisao).
+  let filaDoCache = Promise.resolve();
+
+  /**
+   * Le o cache, permite modificar, e grava de volta - sempre em sequencia.
+   *
+   * Todas as operacoes de chrome.storage ficam protegidas contra erro:
+   * contexto invalidado e quota estourada terminam a fila em silencio, e a
+   * proxima operacao tenta de novo. Nenhuma excecao escapa para o console.
+   *
+   * @param {Function} acao recebe (cache, gravar). gravar(novoCache) persiste,
+   *                        ou gravar(null) para nao escrever nada.
+   */
+  function comCache(acao) {
+    filaDoCache = filaDoCache.then(function () {
+      return new Promise(function (resolve) {
+        let cache;
+
+        try {
+          chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
+            if (chrome.runtime.lastError) {
+              // Contexto invalidado (extensao recarregada) ou acesso negado.
+              resolve();
+              return;
+            }
+
+            cache = guardado[CHAVE_CACHE] || {};
+
+            acao(cache, function (novoCache) {
+              if (novoCache === null || novoCache === undefined) {
+                resolve();  // decisao de nao persistir
+                return;
+              }
+
+              try {
+                chrome.storage.local.set({ [CHAVE_CACHE]: novoCache }, function () {
+                  // Quota estourada não tem o que fazer aqui; terminamos a fila.
+                  resolve();
+                });
+              } catch (e) {
+                resolve();  // contexto invalidado ao gravar
+              }
+            });
+          });
+        } catch (e) {
+          resolve();  // contexto invalidado ao ler
+        }
+      });
+    }).catch(function () {
+      // A fila nunca para: erro de qualquer operacao deixa a proxima tentar.
+    });
+
+    return filaDoCache;
+  }
+
   /**
    * Mescla o que acabamos de achar com o que ja estava guardado.
    *
@@ -561,10 +643,8 @@
     // 600ms sem parar; 2 minutos equilibra frescor com nao pesar em I/O.
     const INTERVALO_RENOVACAO_MS = 2 * 60 * 1000;
 
-    chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
-      // Se for a primeira vez, nao existe nada guardado ainda.
-      const cache = guardado[CHAVE_CACHE] || {};
-
+    // Toda a logica de decidir e persistir roda dentro da fila do cache.
+    comCache(function (cache, gravar) {
       // Ficamos so com os anuncios cujos numeros realmente mudaram.
       //
       // Isso e OBRIGATORIO, nao e otimizacao: o MutationObserver la embaixo
@@ -587,7 +667,10 @@
         return AGORA - (anterior.capturadoEm || 0) >= INTERVALO_RENOVACAO_MS;
       });
 
-      if (mudancas.length === 0 && aRenovar.length === 0) return;
+      if (mudancas.length === 0 && aRenovar.length === 0) {
+        gravar(null);  // nada o que persistir
+        return;
+      }
 
       mudancas.forEach(function (codigo) {
         // Object.assign copia da esquerda para a direita, entao o que vem
@@ -613,20 +696,20 @@
         cache[codigo].capturadoEm = AGORA;
       });
 
-      chrome.storage.local.set({ [CHAVE_CACHE]: cache }, function () {
-        // So anunciamos quando algo de fato MUDOU. Reconhecer de novo sem
-        // novidade nao merece toast a cada 2 minutos.
-        if (mudancas.length > 0) {
-          console.log(
-            "%c[ML METRICS]%c capturei " + mudancas.length + " anuncio(s):",
-            "background:#3483fa;color:#fff;padding:2px 6px;border-radius:3px",
-            "color:#3483fa",
-            novos
-          );
+      gravar(cache);
 
-          avisarNaTela(mudancas.length);
-        }
-      });
+      // So anunciamos quando algo de fato MUDOU. Reconhecer de novo sem
+      // novidade nao merece toast a cada 2 minutos.
+      if (mudancas.length > 0) {
+        console.log(
+          "%c[ML METRICS]%c capturei " + mudancas.length + " anuncio(s):",
+          "background:#3483fa;color:#fff;padding:2px 6px;border-radius:3px",
+          "color:#3483fa",
+          novos
+        );
+
+        avisarNaTela(mudancas.length);
+      }
     });
   }
 
@@ -639,6 +722,11 @@
    * @param {number} quantidade
    */
   function avisarNaTela(quantidade) {
+    // Remove um aviso anterior que ainda esteja na tela. Sem isto, duas
+    // capturas rapidas empilham avisos com o mesmo id no canto da tela.
+    const existente = document.getElementById("mlmetrics-aviso");
+    if (existente) existente.remove();
+
     const aviso = document.createElement("div");
     aviso.id = "mlmetrics-aviso";
     aviso.textContent = quantidade + " anuncio(s) atualizado(s)";
@@ -734,18 +822,28 @@
     // queremos congelar, alem de eventuais identificadores de sessao.
     const limpa = url.split("?")[0];
 
-    chrome.storage.local.get([CHAVE_ORIGENS], function (guardado) {
-      const origens = guardado[CHAVE_ORIGENS] || [];
+    try {
+      chrome.storage.local.get([CHAVE_ORIGENS], function (guardado) {
+        if (chrome.runtime.lastError) return;  // contexto invalidado
 
-      // Ja e a mais recente: nada a fazer, evita gravacao a toa.
-      if (origens[0] === limpa) return;
+        const origens = guardado[CHAVE_ORIGENS] || [];
 
-      const atualizadas = [limpa]
-        .concat(origens.filter(function (u) { return u !== limpa; }))
-        .slice(0, 3);
+        // Ja e a mais recente: nada a fazer, evita gravacao a toa.
+        if (origens[0] === limpa) return;
 
-      chrome.storage.local.set({ [CHAVE_ORIGENS]: atualizadas });
-    });
+        const atualizadas = [limpa]
+          .concat(origens.filter(function (u) { return u !== limpa; }))
+          .slice(0, 3);
+
+        try {
+          chrome.storage.local.set({ [CHAVE_ORIGENS]: atualizadas });
+        } catch (e) {
+          // contexto invalidado: origens nao sao essenciais, tenta depois
+        }
+      });
+    } catch (e) {
+      // contexto invalidado antes mesmo do callback
+    }
   }
 
   /**
@@ -767,47 +865,57 @@
    * e proposital: nao sabemos ainda como essas telas sao construidas.
    */
   function atualizarEmSegundoPlano() {
-    chrome.storage.local.get(
-      [CHAVE_ORIGENS, CHAVE_ULTIMA_BUSCA],
-      function (guardado) {
-        const origens = guardado[CHAVE_ORIGENS] || [];
+    try {
+      chrome.storage.local.get(
+        [CHAVE_ORIGENS, CHAVE_ULTIMA_BUSCA],
+        function (guardado) {
+          if (chrome.runtime.lastError) return;  // contexto invalidado
 
-        // Ainda nao aprendemos nenhuma tela de vendedor.
-        if (origens.length === 0) return;
+          const origens = guardado[CHAVE_ORIGENS] || [];
 
-        const ultima = guardado[CHAVE_ULTIMA_BUSCA] || 0;
+          // Ainda nao aprendemos nenhuma tela de vendedor.
+          if (origens.length === 0) return;
 
-        // Trava de frequencia. Sem ela, cada aba do ML dispararia a busca,
-        // e navegar pelo site viraria uma enxurrada de requisicoes.
-        if (Date.now() - ultima < INTERVALO_BUSCA_MS) return;
+          const ultima = guardado[CHAVE_ULTIMA_BUSCA] || 0;
 
-        // Marcamos ANTES de buscar, nao depois: se marcassemos no fim,
-        // varias abas abertas ao mesmo tempo passariam todas pela trava
-        // antes da primeira terminar.
-        chrome.storage.local.set({ [CHAVE_ULTIMA_BUSCA]: Date.now() });
+          // Trava de frequencia. Sem ela, cada aba do ML dispararia a busca,
+          // e navegar pelo site viraria uma enxurrada de requisicoes.
+          if (Date.now() - ultima < INTERVALO_BUSCA_MS) return;
 
-        origens.forEach(function (url) {
-          fetch(url, { credentials: "include" })
-            .then(function (resposta) {
-              if (!resposta.ok) throw new Error("resposta " + resposta.status);
-              return resposta.text();
-            })
-            .then(function (html) {
-              // DOMParser transforma o texto HTML num documento navegavel,
-              // sem exibir nada na tela e sem executar os scripts dele.
-              const doc = new DOMParser().parseFromString(html, "text/html");
-              if (!doc.body) return;
+          // Marcamos ANTES de buscar, nao depois: se marcassemos no fim,
+          // varias abas abertas ao mesmo tempo passariam todas pela trava
+          // antes da primeira terminar.
+          try {
+            chrome.storage.local.set({ [CHAVE_ULTIMA_BUSCA]: Date.now() });
+          } catch (e) {
+            return;  // contexto invalidado: nem tenta buscar
+          }
 
-              salvar(varrerPagina(doc, url));
-            })
-            .catch(function () {
-              // Sessao expirada, rede fora, pagina mudou de endereco.
-              // Nada a fazer: os dados guardados continuam valendo, e o
-              // painel mostra a idade deles para quem estiver olhando.
-            });
-        });
-      }
-    );
+          origens.forEach(function (url) {
+            fetch(url, { credentials: "include" })
+              .then(function (resposta) {
+                if (!resposta.ok) throw new Error("resposta " + resposta.status);
+                return resposta.text();
+              })
+              .then(function (html) {
+                // DOMParser transforma o texto HTML num documento navegavel,
+                // sem exibir nada na tela e sem executar os scripts dele.
+                const doc = new DOMParser().parseFromString(html, "text/html");
+                if (!doc.body) return;
+
+                salvar(varrerPagina(doc, url));
+              })
+              .catch(function () {
+                // Sessao expirada, rede fora, pagina mudou de endereco.
+                // Nada a fazer: os dados guardados continuam valendo, e o
+                // painel mostra a idade deles para quem estiver olhando.
+              });
+          });
+        }
+      );
+    } catch (e) {
+      // contexto invalidado antes mesmo do callback
+    }
   }
 
   /**
@@ -827,6 +935,15 @@
    * da pagina nem nada da conta de quem usa.
    */
   function salvarDiagnostico() {
+    // Trava de frequencia em memoria (este script). Numa pagina do ML com
+    // DOM inquieto (carrossel, lazy load), uma varredura sem captura acontece
+    // a cada 600ms; sem esta trava, o diagnostico seria regravado a cada uma
+    // delas, enchendo o storage sem nunca ser lido por ninguem.
+    const INTERVALO_DIAGNOSTICO_MS = 3 * 60 * 1000;
+    const agora = Date.now();
+    if (agora - ultimoDiagnostico < INTERVALO_DIAGNOSTICO_MS) return;
+    ultimoDiagnostico = agora;
+
     const amostras = [];
     // Mesmo filtro de varrerPagina: o texto de <script>/<style> do ML embute
     // JSONs com palavras-chave, que sujariam o diagnostico com lixo.
@@ -867,46 +984,89 @@
 
     if (amostras.length === 0) return;
 
-    chrome.storage.local.set({
-      [CHAVE_DIAGNOSTICO]: {
-        // Sem a query string: ela pode carregar identificadores de sessao.
-        url: window.location.href.split("?")[0],
-        quando: Date.now(),
-        amostras: amostras
+    try {
+      chrome.storage.local.set({
+        [CHAVE_DIAGNOSTICO]: {
+          // Sem a query string: ela pode carregar identificadores de sessao.
+          url: window.location.href.split("?")[0],
+          quando: Date.now(),
+          amostras: amostras
+        }
+      });
+    } catch (e) {
+      // Contexto invalidado: diagnostico nao e essencial, proximo ciclo tenta.
+    }
+  }
+
+  // Varre uma vez de imediato e liga o observador SO se houver body.
+  // Em pagina sem body (XML/SVG aberto direto), nao ha o que varrer e o
+  // observer nao pode ser amarrado a um alvo nulo; com a "file:///*" fora
+  // do manifest isso quase nao acontece mais, mas e absurdamente barato
+  // garantir que nenhuma excecao escape quando acontecer.
+  if (document.body) {
+    // Varre uma vez: se a pagina ja veio pronta do servidor, os numeros
+    // estao la e nao ha o que esperar.
+    coletar();
+
+    // Busca automatica: so no site do ML, nunca nos arquivos de teste locais.
+    if (window.location.hostname.indexOf("mercadolivre") !== -1) {
+      atualizarEmSegundoPlano();
+    }
+
+    // Mas telas de vendedor costumam montar a lista por JavaScript, depois
+    // do carregamento. Em vez de apostar num tempo fixo ("espera 1,5s e
+    // torce"), observamos o DOM e reagimos quando o conteudo chega - funcione
+    // a conexao rapida ou lenta.
+    let agendado = null;
+
+    /**
+     * Diz se uma mutacao do DOM vem da propria extensao.
+     *
+     * O painel e o aviso sao adicionados e removidos pelo content.js/coletor.
+     * Sem esta filtragem, criar o aviso disparava uma mutacao, que reagendava
+     * a varredura, que nao achava nada de novo, e por ai em diante - um laco
+     * de trabalho inutil que encarecia a navegacao. A varredura ja ignora o
+     * texto do painel; aqui paramos o estopim antes dele acontecer.
+     *
+     * @param {MutationRecord} mutacao
+     * @returns {boolean}
+     */
+    function mutacaoDaExtensao(mutacao) {
+      if (mutacao.target && mutacao.target.closest &&
+          mutacao.target.closest("#mlmetrics-painel, #mlmetrics-aviso")) {
+        return true;
       }
+
+      // Remocao nao tem mais o alvo no DOM, entao checamos os nos removidos.
+      const lista = [];
+      if (mutacao.addedNodes) lista.push.apply(lista, Array.from(mutacao.addedNodes));
+      if (mutacao.removedNodes) lista.push.apply(lista, Array.from(mutacao.removedNodes));
+
+      return lista.some(function (n) {
+        return n.nodeType === 1 &&
+               (n.id === "mlmetrics-painel" || n.id === "mlmetrics-aviso");
+      });
+    }
+
+    const observador = new MutationObserver(function (mutacoes) {
+      // Mudo o DOM da extensao: nao e conteudo do ML, nao vale re-varrer.
+      if (mutacoes.some(mutacaoDaExtensao)) return;
+
+      // DEBOUNCE: montar uma lista dispara centenas de mutacoes seguidas.
+      // Varrer a cada uma travaria a pagina. Entao cada mutacao CANCELA a
+      // varredura agendada e marca outra - o efeito e varrer uma unica vez,
+      // 600ms depois que as mudancas pararem.
+      clearTimeout(agendado);
+
+      agendado = setTimeout(coletar, 600);
+    });
+
+    observador.observe(document.body, {
+      childList: true,  // elementos adicionados ou removidos
+      subtree: true     // em qualquer profundidade, nao so nos filhos diretos
+      // Nao observamos "characterData" (texto alterado no lugar) de proposito:
+      // dobraria o volume de eventos para ganhar pouco, ja que o ML troca os
+      // elementos inteiros em vez de editar o texto dentro deles.
     });
   }
-
-  // Varre uma vez de imediato: se a pagina ja veio pronta do servidor,
-  // os numeros estao la e nao ha o que esperar.
-  coletar();
-
-  // Busca automatica: so no site do ML, nunca nos arquivos de teste locais.
-  if (window.location.hostname.indexOf("mercadolivre") !== -1) {
-    atualizarEmSegundoPlano();
-  }
-
-  // Mas telas de vendedor costumam montar a lista por JavaScript, depois
-  // do carregamento. Em vez de apostar num tempo fixo ("espera 1,5s e
-  // torce"), observamos o DOM e reagimos quando o conteudo chega - funcione
-  // a conexao rapida ou lenta.
-  let agendado = null;
-
-  const observador = new MutationObserver(function () {
-    // DEBOUNCE: montar uma lista dispara centenas de mutacoes seguidas.
-    // Varrer a cada uma travaria a pagina. Entao cada mutacao CANCELA a
-    // varredura agendada e marca outra - o efeito e varrer uma unica vez,
-    // 600ms depois que as mudancas pararem.
-    clearTimeout(agendado);
-
-    agendado = setTimeout(coletar, 600);
-  });
-
-  observador.observe(document.body, {
-    childList: true,  // elementos adicionados ou removidos
-    subtree: true     // em qualquer profundidade, nao so nos filhos diretos
-    // Nao observamos "characterData" (texto alterado no lugar) de proposito:
-    // dobraria o volume de eventos para ganhar pouco, ja que o ML troca os
-    // elementos inteiros em vez de editar o texto dentro deles.
-  });
 })();

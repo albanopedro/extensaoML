@@ -535,6 +535,6 @@ paramos.
 | 2 — Parsing | ✅ feito | 11/09/2026 | #1, #2, #4, #23, #24. Datas foram além do #1: nova funcao `ehData`. Validado em Node (test_parsing), TODOS PASSARAM. |
 | 3 — Escopo | ✅ feito | 11/09/2026 | #3, #7, #10. |
 | 4 — Confiança | ✅ feito | 11/09/2026 | #8, #9, #19, #16, #18. Limite conhecido do #8: merge ainda carimba data unica (por anuncio, nao por metrica). |
-| 5 — Robustez | ⬜ pendente | — | — |
+| 5 — Robustez | ✅ feito | 11/09/2026 | #13, #11, #12, #21. A fila `comCache` serializa get/set na mesma aba; entre abas a corrida persiste (depende do service worker do lote 6). |
 | 6 — Rede | ⬜ pendente | — | — |
 | 7 — Acabamento | ⬜ pendente | — | — |

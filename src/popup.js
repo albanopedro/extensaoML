@@ -61,25 +61,31 @@
    * Le o storage e desenha o estado atual.
    */
   function desenhar() {
-    chrome.storage.local.get([CHAVE_CACHE, CHAVE_DIAGNOSTICO], function (guardado) {
-      const cache = guardado[CHAVE_CACHE] || {};
-      const codigos = Object.keys(cache);
+    try {
+      chrome.storage.local.get([CHAVE_CACHE, CHAVE_DIAGNOSTICO], function (guardado) {
+        if (chrome.runtime.lastError) return;  // contexto invalidado
 
-      lista.textContent = "";
+        const cache = guardado[CHAVE_CACHE] || {};
+        const codigos = Object.keys(cache);
 
-      if (codigos.length === 0) {
-        resumo.textContent =
-          "Nenhum anúncio capturado ainda. Abra \"Minhas publicações\" " +
-          "no Mercado Livre e espere a lista carregar por completo.";
-        return;
-      }
+        lista.textContent = "";
 
-      resumo.textContent = codigos.length + " anúncio(s) com dados guardados.";
+        if (codigos.length === 0) {
+          resumo.textContent =
+            "Nenhum anúncio capturado ainda. Abra \"Minhas publicações\" " +
+            "no Mercado Livre e espere a lista carregar por completo.";
+          return;
+        }
 
-      codigos.forEach(function (codigo) {
-        lista.appendChild(criarItem(codigo, cache[codigo]));
+        resumo.textContent = codigos.length + " anúncio(s) com dados guardados.";
+
+        codigos.forEach(function (codigo) {
+          lista.appendChild(criarItem(codigo, cache[codigo]));
+        });
       });
-    });
+    } catch (e) {
+      // contexto invalidado: popup inteiro e recarregado pelo navegador
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -89,29 +95,40 @@
   document.getElementById("limpar").addEventListener("click", function () {
     // Apaga so as nossas chaves, nao o storage inteiro. Hoje da na mesma,
     // mas evita surpresa se a extensao passar a guardar outra coisa.
-    chrome.storage.local.remove([CHAVE_CACHE, CHAVE_DIAGNOSTICO], function () {
-      avisar("Dados apagados.");
-      desenhar();
-    });
+    try {
+      chrome.storage.local.remove([CHAVE_CACHE, CHAVE_DIAGNOSTICO], function () {
+        if (chrome.runtime.lastError) return;  // contexto invalidado
+        avisar("Dados apagados.");
+        desenhar();
+      });
+    } catch (e) {
+      // contexto invalidado: popup inteiro e recarregado pelo navegador
+    }
   });
 
   document.getElementById("copiar").addEventListener("click", function () {
-    chrome.storage.local.get([CHAVE_CACHE, CHAVE_DIAGNOSTICO], function (guardado) {
-      // JSON.stringify com indentacao 2 gera texto legivel para colar
-      // numa conversa, em vez de uma linha unica gigante.
-      const relatorio = JSON.stringify({
-        versao: chrome.runtime.getManifest().version,
-        geradoEm: new Date().toISOString(),
-        capturado: guardado[CHAVE_CACHE] || {},
-        diagnostico: guardado[CHAVE_DIAGNOSTICO] || null
-      }, null, 2);
+    try {
+      chrome.storage.local.get([CHAVE_CACHE, CHAVE_DIAGNOSTICO], function (guardado) {
+        if (chrome.runtime.lastError) return;  // contexto invalidado
 
-      navigator.clipboard.writeText(relatorio).then(function () {
-        avisar("Copiado. Cole na conversa.");
-      }).catch(function () {
-        avisar("Não consegui copiar.");
+        // JSON.stringify com indentacao 2 gera texto legivel para colar
+        // numa conversa, em vez de uma linha unica gigante.
+        const relatorio = JSON.stringify({
+          versao: chrome.runtime.getManifest().version,
+          geradoEm: new Date().toISOString(),
+          capturado: guardado[CHAVE_CACHE] || {},
+          diagnostico: guardado[CHAVE_DIAGNOSTICO] || null
+        }, null, 2);
+
+        navigator.clipboard.writeText(relatorio).then(function () {
+          avisar("Copiado. Cole na conversa.");
+        }).catch(function () {
+          avisar("Não consegui copiar.");
+        });
       });
-    });
+    } catch (e) {
+      // contexto invalidado: popup inteiro e recarregado pelo navegador
+    }
   });
 
   desenhar();

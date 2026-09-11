@@ -339,23 +339,31 @@
 
     // chrome.storage e assincrono: devolve por callback, nao por retorno.
     // Toda a montagem do painel acontece dentro dele, ja com o dado em maos.
-    chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
-      // A pagina mudou enquanto o storage respondia: nada a fazer aqui.
-      if (extrairCodigoAnuncio() !== codigoNoInicio) return;
+    try {
+      chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
+        if (chrome.runtime.lastError) return;  // contexto invalidado
 
-      const cache = guardado[CHAVE_CACHE] || {};
-      const dados = cache[codigoNoInicio];
+        // A pagina mudou enquanto o storage respondia: nada a fazer aqui.
+        if (extrairCodigoAnuncio() !== codigoNoInicio) return;
 
-      if (!dados) {
-        // So mostramos o painel vazio quando HA outros anuncios capturados.
-        // Se o cache esta vazio, a pessoa provavelmente esta navegando como
-        // compradora - o painel so faria ruido sobre todo produto que abrir.
-        if (Object.keys(cache).length > 0) montarPainelVazio();
-        return;
-      }
+        const cache = guardado[CHAVE_CACHE] || {};
+        const dados = cache[codigoNoInicio];
 
-      montarPainel(codigoNoInicio, calcular(dados, lerPreco()), dados.capturadoEm);
-    });
+        if (!dados) {
+          // So mostramos o painel vazio quando HA outros anuncios capturados.
+          // Se o cache esta vazio, a pessoa provavelmente esta navegando como
+          // compradora - o painel so faria ruido sobre todo produto que abrir.
+          if (Object.keys(cache).length > 0) montarPainelVazio();
+          return;
+        }
+
+        montarPainel(codigoNoInicio, calcular(dados, lerPreco()), dados.capturadoEm);
+      });
+    } catch (e) {
+      // contexto invalidado: o painel antigo sai, a proxima leitura tenta.
+      const anterior = document.getElementById(PREFIXO + "-painel");
+      if (anterior) anterior.remove();
+    }
   }
 
   atualizar();
