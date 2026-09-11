@@ -34,10 +34,18 @@
   // dependendo da tela. Repare que "vendido" NAO contem "venda" - por isso
   // precisam ser termos separados, e nao um prefixo curto como "vend"
   // (que pegaria "Vender um igual" e sujaria o resultado).
+  // Nao sabemos qual destas palavras o ML usa nas telas de vendedor, entao
+  // cobrimos as variantes plausiveis. Usamos raizes curtas onde a flexao
+  // muda o fim da palavra: "visualiz" pega "visualizacoes" e "visualizações"
+  // (com e sem acento), que seriam duas entradas separadas.
   const ROTULOS = {
-    visitas: ["visita"],
-    vendas: ["venda", "vendido"]
+    visitas: ["visita", "visualiz"],
+    vendas: ["venda", "vendido", "vendida"]
   };
+
+  // Guarda o que a extensao viu quando nao conseguiu capturar nada.
+  // Serve para diagnostico remoto - ver salvarDiagnostico().
+  const CHAVE_DIAGNOSTICO = "mlmetrics_diagnostico";
 
   // Identificadores de anuncio do Mercado Livre.
   //
@@ -553,7 +561,77 @@
   function coletar() {
     if (ehPaginaDeCompra()) return;
 
-    salvar(varrerPagina());
+    const achados = varrerPagina();
+
+    // Nada capturado numa tela onde deveria haver algo. Em vez de apenas
+    // desistir em silencio, registramos o que estava escrito na pagina.
+    if (Object.keys(achados).length === 0) {
+      salvarDiagnostico();
+      return;
+    }
+
+    salvar(achados);
+  }
+
+  /**
+   * Guarda uma amostra dos textos que PARECEM metrica mas nao viraram dado.
+   *
+   * Este e o plano de contingencia da extensao. A heuristica foi escrita sem
+   * nunca termos visto as telas de vendedor de verdade, entao ela pode nao
+   * reconhecer o formato que o ML usa. Quando isso acontece, quem esta do
+   * outro lado so consegue dizer "nao apareceu nada" - e nao da para
+   * consertar as cegas.
+   *
+   * Guardando os trechos de texto que contem as palavras-chave, mais o texto
+   * do elemento em volta (onde o numero costuma estar), fica possivel ver
+   * como a tela e montada e ajustar de uma vez, sem varias idas e vindas.
+   *
+   * Guardamos apenas trechos curtos que mencionam metricas - nao o conteudo
+   * da pagina nem nada da conta de quem usa.
+   */
+  function salvarDiagnostico() {
+    const amostras = [];
+    const caminhante = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+
+    let no = caminhante.nextNode();
+
+    // Paramos em 25 amostras: o suficiente para entender o padrao da tela
+    // sem encher o storage nem gerar um relatorio impossivel de ler.
+    while (no && amostras.length < 25) {
+      const texto = (no.nodeValue || "").trim();
+      const minusculo = texto.toLowerCase();
+
+      const pareceMetrica = Object.keys(ROTULOS).some(function (metrica) {
+        return ROTULOS[metrica].some(function (palavra) {
+          return minusculo.indexOf(palavra) !== -1;
+        });
+      });
+
+      // O limite de tamanho descarta paragrafos: se o texto e longo, e
+      // prosa mencionando a palavra, nao um rotulo de metrica.
+      if (pareceMetrica && texto.length > 0 && texto.length < 120) {
+        amostras.push({
+          texto: texto,
+          // O elemento em volta costuma conter o numero que nao achamos.
+          contexto: no.parentElement
+            ? no.parentElement.textContent.trim().slice(0, 160)
+            : ""
+        });
+      }
+
+      no = caminhante.nextNode();
+    }
+
+    if (amostras.length === 0) return;
+
+    chrome.storage.local.set({
+      [CHAVE_DIAGNOSTICO]: {
+        // Sem a query string: ela pode carregar identificadores de sessao.
+        url: window.location.href.split("?")[0],
+        quando: Date.now(),
+        amostras: amostras
+      }
+    });
   }
 
   // Varre uma vez de imediato: se a pagina ja veio pronta do servidor,
