@@ -828,6 +828,13 @@
     // queremos congelar, alem de eventuais identificadores de sessao.
     const limpa = url.split("?")[0];
 
+    // Telas de UM anuncio tem o codigo (MLB...) no caminho, e nao prestam
+    // para voltar depois: cada uma mostra so as metricas daquele anuncio.
+    // Guarda-las acabaria enchendo as 3 vagas e expulsando a tela de
+    // publicacoes - a unica que vale revisitar. O filtro e a mesma regra
+    // usada para achar anuncios dentro da tela de vendas.
+    if (limpa.match(PADRAO_CODIGO)) return;
+
     try {
       chrome.storage.local.get([CHAVE_ORIGENS], function (guardado) {
         if (chrome.runtime.lastError) return;  // contexto invalidado
@@ -859,10 +866,12 @@
    * pessoa passar pela tela de publicacoes, a extensao vai buscar. Basta
    * ela ter QUALQUER pagina do Mercado Livre aberta.
    *
-   * Funciona porque o content script roda dentro do dominio do ML: uma
-   * requisicao daqui leva os cookies de sessao junto, entao o servidor
-   * responde como responderia ao navegador dela. Nada sai do computador
-   * dela, e nenhuma credencial passa pela extensao.
+   * O fetch NAO acontece aqui - vai para o service worker (background.js).
+   * No Manifest V3, fetch de content script carrega a origem da pagina e
+   * esbarra em CORS quando a origem guardada nao e o mesmo subdominio
+   * aberto. No service worker a origem e a da extensao, e com
+   * host_permissions o CORS nao se aplica. A resposta volta como texto e o
+   * parse continua aqui, reusando varrerPagina inteiro.
    *
    * Se a tela for montada por JavaScript no navegador, o HTML que chega
    * vem sem os numeros. Nesse caso varrerPagina nao acha nada, salvar()
@@ -898,30 +907,64 @@
           }
 
           origens.forEach(function (url) {
-            fetch(url, { credentials: "include" })
-              .then(function (resposta) {
-                if (!resposta.ok) throw new Error("resposta " + resposta.status);
-                return resposta.text();
-              })
-              .then(function (html) {
+            if (!chrome.runtime.sendMessage) {
+              // Sem API de mensagem (nunca deveria no MV3): degrada em
+              // silencio, a coleta local continua cobrindo.
+              return;
+            }
+
+            try {
+              chrome.runtime.sendMessage({ tipo: "buscar", url: url }, function (resposta) {
+                if (chrome.runtime.lastError) return;  // SW dormiu/reiniciou
+
+                if (!resposta || !resposta.ok) return;
+
                 // DOMParser transforma o texto HTML num documento navegavel,
                 // sem exibir nada na tela e sem executar os scripts dele.
-                const doc = new DOMParser().parseFromString(html, "text/html");
+                const doc = new DOMParser().parseFromString(resposta.html, "text/html");
                 if (!doc.body) return;
 
                 salvar(varrerPagina(doc, url), true);
-              })
-              .catch(function () {
-                // Sessao expirada, rede fora, pagina mudou de endereco.
-                // Nada a fazer: os dados guardados continuam valendo, e o
-                // painel mostra a idade deles para quem estiver olhando.
               });
+            } catch (e) {
+              // contexto invalidado ao enviar a mensagem
+            }
           });
         }
       );
     } catch (e) {
       // contexto invalidado antes mesmo do callback
     }
+  }
+
+  /**
+   * Janela de texto em volta do rotulo, para o diagnostico.
+   *
+   * O pai do rotulo pode guardar coisa demais (titulo, preco, nome de
+   * comprador). Perfurar ate o rotulo e mostrar so o que esta colado nele
+   * mostra onde o numero costuma estar sem vazar o resto do card.
+   *
+   * @param {Node} no no de texto do rotulo
+   * @param {string} rotulo texto do no, ja com trim
+   * @returns {string}
+   */
+  function contextoDoTexto(no, rotulo) {
+    const pai = no.parentElement;
+    if (!pai) return rotulo;
+
+    const todo = pai.textContent || "";
+    const orig = no.nodeValue || "";
+
+    // textContent concatena os nos filhos sem separador; procurar o
+    // nodeValue original acha a posicao exata do rotulo.
+    const pos = todo.indexOf(orig);
+    if (pos === -1) return rotulo;
+
+    const ANTES = 20;
+    const DEPOIS = 80;
+    const inicio = Math.max(0, pos - ANTES);
+    const fim = Math.min(todo.length, pos + orig.length + DEPOIS);
+    return todo.slice(inicio, fim).trim();
   }
 
   /**
@@ -933,12 +976,17 @@
    * outro lado so consegue dizer "nao apareceu nada" - e nao da para
    * consertar as cegas.
    *
-   * Guardando os trechos de texto que contem as palavras-chave, mais o texto
-   * do elemento em volta (onde o numero costuma estar), fica possivel ver
-   * como a tela e montada e ajustar de uma vez, sem varias idas e vindas.
+   * Guardando os trechos de texto que contem as palavras-chave, mais uma
+   * JANELA de texto em volta do rotulo (onde o numero costuma estar), fica
+   * possivel ver como a tela e montada e ajustar de uma vez, sem varias
+   * idas e vindas.
    *
    * Guardamos apenas trechos curtos que mencionam metricas - nao o conteudo
-   * da pagina nem nada da conta de quem usa.
+   * da pagina nem dados da conta de quem usa. A janela e estreita de
+   * proposito: pegar o pai INTERO (o antigo slice(0,160)) capturava titulo do
+   * anuncio, preco, nome de comprador e numero de pedido que por acaso
+   * dividissem o mesmo elemento do rotulo - e essa amostra iria para o
+   * clipboard no popup.
    */
   function salvarDiagnostico() {
     // Trava de frequencia em memoria (este script). Numa pagina do ML com
@@ -978,10 +1026,13 @@
       if (pareceMetrica && texto.length > 0 && texto.length < 120) {
         amostras.push({
           texto: texto,
-          // O elemento em volta costuma conter o numero que nao achamos.
-          contexto: no.parentElement
-            ? no.parentElement.textContent.trim().slice(0, 160)
-            : ""
+          // Janela em volta do rotulo, nao o pai inteiro. Pegar o pai todo
+          // arrastava titulo, preco, nome de comprador e numero de pedido
+          // que compartilhassem o mesmo elemento - dado de conta que nao
+          // devia sair daqui. O numero que queremos ver fica colado no
+          // rotulo, entao 20 antes + 80 depois bastam para entender o
+          // formato; o resto do card fica de fora de proposito.
+          contexto: contextoDoTexto(no, texto)
         });
       }
 

@@ -8,9 +8,22 @@ Duas coisas importantes:
 
 - **Não vou pedir a sua senha do Mercado Livre**, e você não deve me passar.
   A extensão funciona dentro do seu navegador, com você já logada. Ela não
-  acessa sua conta de fora nem envia nada para lugar nenhum.
+  envia nada para lugar nenhum — nenhum número sai do seu computador.
 - **Guarde a pasta num lugar definitivo** antes de instalar (Documentos, por
   exemplo). Se ela for movida ou apagada depois, a extensão para de funcionar.
+
+### O que a extensão faz por conta própria
+
+Com alguma extensão do Mercado Livre aberta, a ML Metrics visita sozinha, a
+cada 2 horas, as telas de vendedor que já capturaram dados — para atualizar
+os números sem você precisar passar por todas elas de novo. Isso acontece
+dentro do seu navegador, com você já logada. É um comportamento silencioso:
+você não precisa fazer nada, e pode notá-lo como se a página "abrisse e
+fechasse" sozinha de vez em quando.
+
+Como essa visita automática acontece com a sua sessão do Mercado Livre, evite
+ter dúvidas de segurança: as telas são consultadas de forma idêntica a um
+acesso seu de verdade, sem pressa nem repetições em série.
 
 ## Instalando
 

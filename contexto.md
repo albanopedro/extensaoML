@@ -59,22 +59,22 @@ próximo), não por seletor CSS fixo.
 extensaoML/
 ├── manifest.json            <- manifest DE PRODUCAO (o que vale)
 ├── INSTRUCOES-CLIENTE.md    <- passo a passo de instalacao para a vendedora
+├── icons/                   <- icon16/32/48/128.png (gerados por PowerShell)
 ├── src/
-│   ├── coletor.js   (~780 linhas)  CAPTURA. Roda em toda pagina do ML. Acha
-│   │                               rotulos no texto, extrai numeros, grava em
-│   │                               chrome.storage.local. Onde estao os piores bugs.
-│   ├── content.js   (~353 linhas)  EXIBE. Le o storage e monta o painel azul na
-│   │                               pagina do anuncio. Le o preco da pagina.
-│   ├── content.css                 Estilo do painel e do aviso verde.
-│   ├── popup.html / popup.js       Painel de controle: lista o capturado, limpa
-│   │                               dados, copia diagnostico para o clipboard.
-│   └── sniffer.js                  Ferramenta de investigacao da Etapa 2. NAO esta
-│                                   no manifest de producao. Codigo morto no pacote.
+│   ├── background.js (~46)  SERVICE WORKER (MV3). Faz o fetch das telas
+│   │                        aprendidas (sem CORS, com host_permissions).
+│   ├── coletor.js (~1129)   CAPTURA. Roda em toda pagina do ML. Acha rotulos
+│   │                        no texto, extrai numeros, grava em
+│   │                        chrome.storage.local. Onde estavam os piores bugs.
+│   ├── content.js (~446)    EXIBE. Le o storage e monta o painel azul na
+│   │                        pagina do anuncio. Le o preco da pagina.
+│   ├── content.css (~132)   Estilo do painel e do aviso verde.
+│   ├── popup.html / popup.js  Painel de controle: lista o capturado, limpa
+│   │                        dados, copia diagnostico para o clipboard.
+│   └── (sniffer.js REMOVIDO - era codigo morto da Etapa 2, ver #29)
 ├── teste/
 │   ├── publicacoes.html            Fixture da tela "Minhas publicacoes", com gabarito.
 │   └── MLB-1111111111-anuncio.html Fixture da pagina de anuncio, com gabarito.
-└── extensaoML/                     PASTA DUPLICADA com uma copia ANTIGA (Etapa 1)
-                                    do projeto inteiro. Ver problema #14.
 ```
 
 ### Chaves usadas no `chrome.storage.local`
@@ -93,7 +93,9 @@ extensaoML/
    cada número a um código `MLB…`, grava no storage e mostra um toast verde.
 2. `content.js` roda na página do anúncio, lê o storage pelo código da URL, lê o preço
    da página e monta o painel azul no canto superior direito.
-3. A cada 2 h, `coletor.js` faz `fetch` das URLs aprendidas para atualizar sozinho.
+3. A cada 2 h, o **service worker** (`background.js`) faz `fetch` das URLs aprendidas
+   (origem da extensão → sem CORS) e devolve o HTML ao content script, que o parseia
+   com o mesmo `varrerPagina` e grava em silêncio (sem toast).
 
 ---
 
@@ -102,7 +104,9 @@ extensaoML/
 Revisão completa feita em **11/09/2026**. **33 problemas** encontrados e confirmados —
 os de parsing foram validados rodando as funções puras em Node, não são teoria.
 
-**Nenhuma correção foi aplicada ainda.** Tudo abaixo está pendente.
+**Todos os 33 foram corrigidos em 11/09/2026.** A seção 9 (Registro de progresso) lista
+o que mudou em cada lote. A lista abaixo (seção 5) fica como referência histórica da
+auditoria: os números de linha apontam para o código **antes** das correções.
 
 ---
 
@@ -535,6 +539,6 @@ paramos.
 | 2 — Parsing | ✅ feito | 11/09/2026 | #1, #2, #4, #23, #24. Datas foram além do #1: nova funcao `ehData`. Validado em Node (test_parsing), TODOS PASSARAM. |
 | 3 — Escopo | ✅ feito | 11/09/2026 | #3, #7, #10. |
 | 4 — Confiança | ✅ feito | 11/09/2026 | #8, #9, #19, #16, #18. Limite conhecido do #8: merge ainda carimba data unica (por anuncio, nao por metrica). |
-| 5 — Robustez | ✅ feito | 11/09/2026 | #13, #11, #12, #21. A fila `comCache` serializa get/set na mesma aba; entre abas a corrida persiste (depende do service worker do lote 6). |
-| 6 — Rede | ⬜ pendente | — | #6 precisa decisao (service worker); #17 sem Web Accessible Resources; #20 snapshots HTML/JSON; #32 documentar em INSTRUCOES-CLIENTE. |
+| 5 — Robustez | ✅ feito | 11/09/2026 | #13, #11, #12, #21. A fila `comCache` serializa get/set na mesma aba; entre abas a corrida persiste (nao resolvido - o SW do #6 moveu so o fetch, nao a escrita). |
+| 6 — Rede | ✅ feito | 11/09/2026 | #6 (fetch movido p/ service worker c/ host_permissions), #17 (origens nao guardam URL de anuncio isolado), #20 (diagnostico so guarda janela do rotulo), #32 (INSTRUCOES sincera). sniffer.js removido (era item do #29). |
 | 7 — Acabamento | ✅ feito | 11/09/2026 | #15, #22, #25, #26, #27, #28, #30, #31. #15 em sniffer (fora do manifest prod.). #25 ja feito no #11. |
