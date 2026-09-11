@@ -74,6 +74,18 @@
   line-height: 1.35;
 }
 
+/* Dado velho precisa PARECER velho. Enquanto o aviso normal fica discreto,
+   este ganha fundo e contraste - a intencao e que seja impossivel ler os
+   numeros sem notar que eles podem estar desatualizados. */
+#mlmetrics-painel .mlmetrics-alerta {
+  opacity: 1;
+  background: #fff3cd;
+  color: #7a5c00;
+  padding: 6px 8px;
+  border-radius: 5px;
+  font-weight: 600;
+}
+
 /* Aviso temporario mostrado pelo coletor nas telas de vendedor.
    Fica embaixo para nao disputar espaco com o painel, que fica em cima. */
 #mlmetrics-aviso {

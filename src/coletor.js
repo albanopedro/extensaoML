@@ -47,6 +47,15 @@
   // Serve para diagnostico remoto - ver salvarDiagnostico().
   const CHAVE_DIAGNOSTICO = "mlmetrics_diagnostico";
 
+  // Enderecos de telas de vendedor que ja entregaram numeros, e quando
+  // foi a ultima busca automatica neles.
+  const CHAVE_ORIGENS = "mlmetrics_origens";
+  const CHAVE_ULTIMA_BUSCA = "mlmetrics_ultima_busca";
+
+  // De quanto em quanto tempo a extensao vai buscar dados sozinha.
+  // Duas horas equilibra dado fresco com nao pesar na navegacao dela.
+  const INTERVALO_BUSCA_MS = 2 * 60 * 60 * 1000;
+
   // Identificadores de anuncio do Mercado Livre.
   //
   // A letra opcional depois de "MLB" faz parte do codigo, nao e ruido:
@@ -189,13 +198,13 @@
    * @param {Element} elemento ponto de partida
    * @returns {string|null}
    */
-  function contextoDoAnuncio(elemento) {
+  function contextoDoAnuncio(elemento, doc, url) {
     // Caso mais facil: a propria URL da pagina ja identifica o anuncio.
     // Vale quando estamos na tela de metricas de UM anuncio especifico -
     // ali a pagina inteira fala de um produto so, entao o limite e o body.
-    const naUrl = window.location.href.match(PADRAO_CODIGO);
+    const naUrl = url.match(PADRAO_CODIGO);
     if (naUrl) {
-      return { codigo: naUrl[1] + naUrl[2], limite: document.body };
+      return { codigo: naUrl[1] + naUrl[2], limite: doc.body };
     }
 
     let atual = elemento;
@@ -311,11 +320,11 @@
    *
    * @returns {Object} mapa { MLB123: { visitas: 359 }, ... }
    */
-  function varrerPagina() {
+  function varrerPagina(doc, url) {
     const resultado = {};
 
-    const caminhante = document.createTreeWalker(
-      document.body,
+    const caminhante = doc.createTreeWalker(
+      doc.body,
       NodeFilter.SHOW_TEXT  // so nos de texto, ignora tags e comentarios
     );
 
@@ -343,7 +352,7 @@
             // indexOf(...) !== -1 significa "contem".
             if (texto.indexOf(palavra) === -1) return;
 
-            const contexto = contextoDoAnuncio(elemento);
+            const contexto = contextoDoAnuncio(elemento, doc, url);
             if (!contexto) return;
 
             const codigo = contexto.codigo;
@@ -548,8 +557,8 @@
    *
    * @returns {boolean}
    */
-  function ehPaginaDeCompra() {
-    const texto = document.body.textContent.toLowerCase();
+  function ehPaginaDeCompra(doc) {
+    const texto = doc.body.textContent.toLowerCase();
 
     return texto.indexOf("adicionar ao carrinho") !== -1 ||
            texto.indexOf("comprar agora") !== -1;
@@ -559,9 +568,9 @@
    * Varre e guarda, se este for um lugar de onde se deve coletar.
    */
   function coletar() {
-    if (ehPaginaDeCompra()) return;
+    if (ehPaginaDeCompra(document)) return;
 
-    const achados = varrerPagina();
+    const achados = varrerPagina(document, window.location.href);
 
     // Nada capturado numa tela onde deveria haver algo. Em vez de apenas
     // desistir em silencio, registramos o que estava escrito na pagina.
@@ -571,6 +580,105 @@
     }
 
     salvar(achados);
+
+    // Deu certo aqui: guardamos o endereco para poder voltar sozinhos depois.
+    lembrarOrigem(window.location.href);
+  }
+
+  // --------------------------------------------------------------------------
+  // Atualizacao automatica
+  // --------------------------------------------------------------------------
+
+  /**
+   * Guarda os enderecos onde a captura funcionou.
+   *
+   * Nao sabemos de antemao qual e a URL da tela de publicacoes - o ML pode
+   * mudar, e varia conforme o tipo de conta. Entao em vez de adivinhar,
+   * APRENDEMOS: toda vez que uma tela entrega numeros, anotamos o endereco
+   * dela. Depois a extensao volta nesses enderecos por conta propria.
+   *
+   * Guardamos no maximo 3, mais recente primeiro, porque telas diferentes
+   * podem entregar metricas diferentes.
+   */
+  function lembrarOrigem(url) {
+    // Sem a query string: ela costuma ter filtros e paginacao que nao
+    // queremos congelar, alem de eventuais identificadores de sessao.
+    const limpa = url.split("?")[0];
+
+    chrome.storage.local.get([CHAVE_ORIGENS], function (guardado) {
+      const origens = guardado[CHAVE_ORIGENS] || [];
+
+      // Ja e a mais recente: nada a fazer, evita gravacao a toa.
+      if (origens[0] === limpa) return;
+
+      const atualizadas = [limpa]
+        .concat(origens.filter(function (u) { return u !== limpa; }))
+        .slice(0, 3);
+
+      chrome.storage.local.set({ [CHAVE_ORIGENS]: atualizadas });
+    });
+  }
+
+  /**
+   * Busca as telas de vendedor sozinha e atualiza os numeros.
+   *
+   * E isto que faz os dados envelhecerem menos: em vez de depender de a
+   * pessoa passar pela tela de publicacoes, a extensao vai buscar. Basta
+   * ela ter QUALQUER pagina do Mercado Livre aberta.
+   *
+   * Funciona porque o content script roda dentro do dominio do ML: uma
+   * requisicao daqui leva os cookies de sessao junto, entao o servidor
+   * responde como responderia ao navegador dela. Nada sai do computador
+   * dela, e nenhuma credencial passa pela extensao.
+   *
+   * Se a tela for montada por JavaScript no navegador, o HTML que chega
+   * vem sem os numeros. Nesse caso varrerPagina nao acha nada, salvar()
+   * ignora, e tudo segue funcionando pela captura normal - a atualizacao
+   * automatica simplesmente nao acrescenta. Degradar assim, sem quebrar,
+   * e proposital: nao sabemos ainda como essas telas sao construidas.
+   */
+  function atualizarEmSegundoPlano() {
+    chrome.storage.local.get(
+      [CHAVE_ORIGENS, CHAVE_ULTIMA_BUSCA],
+      function (guardado) {
+        const origens = guardado[CHAVE_ORIGENS] || [];
+
+        // Ainda nao aprendemos nenhuma tela de vendedor.
+        if (origens.length === 0) return;
+
+        const ultima = guardado[CHAVE_ULTIMA_BUSCA] || 0;
+
+        // Trava de frequencia. Sem ela, cada aba do ML dispararia a busca,
+        // e navegar pelo site viraria uma enxurrada de requisicoes.
+        if (Date.now() - ultima < INTERVALO_BUSCA_MS) return;
+
+        // Marcamos ANTES de buscar, nao depois: se marcassemos no fim,
+        // varias abas abertas ao mesmo tempo passariam todas pela trava
+        // antes da primeira terminar.
+        chrome.storage.local.set({ [CHAVE_ULTIMA_BUSCA]: Date.now() });
+
+        origens.forEach(function (url) {
+          fetch(url, { credentials: "include" })
+            .then(function (resposta) {
+              if (!resposta.ok) throw new Error("resposta " + resposta.status);
+              return resposta.text();
+            })
+            .then(function (html) {
+              // DOMParser transforma o texto HTML num documento navegavel,
+              // sem exibir nada na tela e sem executar os scripts dele.
+              const doc = new DOMParser().parseFromString(html, "text/html");
+              if (!doc.body) return;
+
+              salvar(varrerPagina(doc, url));
+            })
+            .catch(function () {
+              // Sessao expirada, rede fora, pagina mudou de endereco.
+              // Nada a fazer: os dados guardados continuam valendo, e o
+              // painel mostra a idade deles para quem estiver olhando.
+            });
+        });
+      }
+    );
   }
 
   /**
@@ -637,6 +745,11 @@
   // Varre uma vez de imediato: se a pagina ja veio pronta do servidor,
   // os numeros estao la e nao ha o que esperar.
   coletar();
+
+  // Busca automatica: so no site do ML, nunca nos arquivos de teste locais.
+  if (window.location.hostname.indexOf("mercadolivre") !== -1) {
+    atualizarEmSegundoPlano();
+  }
 
   // Mas telas de vendedor costumam montar a lista por JavaScript, depois
   // do carregamento. Em vez de apostar num tempo fixo ("espera 1,5s e

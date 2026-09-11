@@ -30,6 +30,11 @@
   //   MLBU5098517614   ->  MLBU5098517614   estrutura nova (/up/)
   const PADRAO_CODIGO = /(MLB[A-Z]?)-?(\d{6,})/;
 
+  // A partir de quantos dias o dado passa a ser exibido como suspeito.
+  // Tres dias e curto o bastante para que um anuncio ativo nao pareca
+  // parado, e longo o bastante para nao alarmar por causa de um fim de semana.
+  const DIAS_PARA_ALERTA = 3;
+
   // --------------------------------------------------------------------------
   // Leitura
   // --------------------------------------------------------------------------
@@ -108,12 +113,25 @@
   function descreverIdade(timestamp) {
     if (!timestamp) return "origem desconhecida";
 
-    const MS_POR_DIA = 24 * 60 * 60 * 1000;
-    const dias = Math.floor((Date.now() - timestamp) / MS_POR_DIA);
+    const dias = diasDesde(timestamp);
 
     if (dias <= 0) return "atualizado hoje";
     if (dias === 1) return "atualizado ontem";
+
+    if (dias >= DIAS_PARA_ALERTA) {
+      // Acima do limite, avisamos de forma explicita em vez de so informar
+      // a data. Numero velho apresentado com a mesma confianca de um numero
+      // novo induz a decisao errada - e quem le nao tem como desconfiar.
+      return "dados de " + dias + " dias atrás — abra \"Minhas publicações\" " +
+             "para atualizar";
+    }
+
     return "atualizado há " + dias + " dias";
+  }
+
+  function diasDesde(timestamp) {
+    const MS_POR_DIA = 24 * 60 * 60 * 1000;
+    return Math.floor((Date.now() - timestamp) / MS_POR_DIA);
   }
 
   // --------------------------------------------------------------------------
@@ -232,6 +250,11 @@
 
     const rodape = document.createElement("div");
     rodape.className = PREFIXO + "-status";
+
+    if (capturadoEm && diasDesde(capturadoEm) >= DIAS_PARA_ALERTA) {
+      rodape.className += " " + PREFIXO + "-alerta";
+    }
+
     rodape.textContent = descreverIdade(capturadoEm);
     painel.appendChild(rodape);
 
