@@ -46,9 +46,34 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.15);
 }
 
-/* A ultima linha nao precisa de divisoria embaixo. */
-#mlmetrics-painel .mlmetrics-linha:last-of-type {
+/* A ultima linha nao precisa de divisoria embaixo: o rodape de status ja
+   separa do resto da pagina. A classe "mlmetrics-ultima" e aplicada por JS
+   na montagem - CSS nao tem como dizer "a ultima .mlmetrics-linha" de forma
+   confiavel, porque todos os filhos (linhas e rodape) sao DIVs. */
+#mlmetrics-painel .mlmetrics-ultima {
   border-bottom: none;
+}
+
+/* Botao de fechar: pequeno, no canto superior direito do painel. */
+#mlmetrics-painel .mlmetrics-fechar {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+
+  /* Botao nativo traz fundo e borda do navegador; desmontamos para virar
+     um "x" discreto e nao disputar a atencao com o titulo. */
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.7;
+  padding: 2px 4px;
+}
+
+#mlmetrics-painel .mlmetrics-fechar:hover {
+  opacity: 1;
 }
 
 #mlmetrics-painel .mlmetrics-rotulo {

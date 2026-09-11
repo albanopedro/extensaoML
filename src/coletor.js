@@ -36,7 +36,7 @@
   // (que pegaria "Vender um igual" e sujaria o resultado).
   //
   // Nao usamos "visualiz" para visitas: toda tela de vendedor tem o botao
-  // "Visualizar anúncio", e o numero colado antes dele (estoque, posicao na
+  // "Visualizar anuncio", e o numero colado antes dele (estoque, posicao na
   // lista) seria lido como visitas. "visita" cobre o rotulo que o ML usa.
   const ROTULOS = {
     visitas: ["visita"],
@@ -213,7 +213,7 @@
   /**
    * Diz se ha alguma letra no texto.
    *
-   * Um intervalo unico "À-ú" (U+00C0-U+00FA) seria torto: inclui "×" (U+00D7)
+   * Um intervalo unico entre as letras A e U de 8 bits (0xC0-0xFA) seria torto: inclui "×" (U+00D7)
    * e "÷" (U+00F7), que nao sao letras, e exclui "ü", "ý" e "ÿ". Por isso
    * usamos tres intervalos que pulam os simbolos e pegam os acentos do
    * portugues mais os diacriticos comuns:
@@ -566,7 +566,7 @@
   //
   // O chrome.storage nao oferece leitura-modificacao-escrita atomica: entre
   // o get e o set, outra operacao pode entrar e gravar por cima. Encadear
-  // tudo numa fila única impede que duas varre duras rapidas da MESMA aba se
+   // tudo numa fila unica impede que duas varre duras rapidas da MESMA aba se
   // pisem - o que acontecia com o aviso verde provocando re-varredura.
   // Entre abas DISTINTAS a corrida continua: resolver exigiria centralizar
   // a escrita num service worker (o lote 6 da revisao).
@@ -605,7 +605,7 @@
 
               try {
                 chrome.storage.local.set({ [CHAVE_CACHE]: novoCache }, function () {
-                  // Quota estourada não tem o que fazer aqui; terminamos a fila.
+                  // Quota estourada nao tem o que fazer aqui; terminamos a fila.
                   resolve();
                 });
               } catch (e) {
@@ -632,8 +632,13 @@
    * capturado nas telas anteriores.
    *
    * @param {Object} novos
+   * @param {boolean} emSegundoPlano true quando a origem e a busca manual
+   *                        automatica (fetch), nao uma tela que a pessoa
+   *                        esta vendo. Nesse caso o aviso verde nao faz
+   *                        sentido: mostraria um toast sobre uma pagina que
+   *                        nao tem relacao com os numeros capturados.
    */
-  function salvar(novos) {
+  function salvar(novos, emSegundoPlano) {
     if (Object.keys(novos).length === 0) return;
 
     const AGORA = Date.now();
@@ -699,8 +704,9 @@
       gravar(cache);
 
       // So anunciamos quando algo de fato MUDOU. Reconhecer de novo sem
-      // novidade nao merece toast a cada 2 minutos.
-      if (mudancas.length > 0) {
+      // novidade nao merece toast a cada 2 minutos. E a busca em segundo
+      // plano nunca anuncia: a pessoa nao esta olhando a tela capturada.
+      if (mudancas.length > 0 && !emSegundoPlano) {
         console.log(
           "%c[ML METRICS]%c capturei " + mudancas.length + " anuncio(s):",
           "background:#3483fa;color:#fff;padding:2px 6px;border-radius:3px",
@@ -903,7 +909,7 @@
                 const doc = new DOMParser().parseFromString(html, "text/html");
                 if (!doc.body) return;
 
-                salvar(varrerPagina(doc, url));
+                salvar(varrerPagina(doc, url), true);
               })
               .catch(function () {
                 // Sessao expirada, rede fora, pagina mudou de endereco.

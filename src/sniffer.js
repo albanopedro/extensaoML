@@ -86,7 +86,11 @@
     const primeiro = args[0];
     const url = (typeof primeiro === "string") ? primeiro : (primeiro && primeiro.url) || "";
 
-    return fetchOriginal.apply(this, args).then(function (resposta) {
+    // IMPORTANTE: usamos window como this do fetch original.
+    // Se a pagina fizer "const f = window.fetch; f(url)" (padrao comum em
+    // bundlers), o this seria undefined e apply() lancaria TypeError, quebrando
+    // requisicoes do proprio ML. window e sempre um alvo valido para fetch.
+    return fetchOriginal.apply(window, args).then(function (resposta) {
       window.__mlmetricsUrls.push(url);
 
       const contentType = resposta.headers.get("content-type") || "";
@@ -129,7 +133,13 @@
     const xhr = this;
 
     // "load" dispara quando a resposta chega com sucesso.
-    xhr.addEventListener("load", function () {
+    // once:true evita listener acumulado quando a pagina reutiliza o MESMO
+    // objeto XHR para varias chamadas (o send() roda de novo a cada uma).
+    xhr.addEventListener("load", function onLoad() {
+      // Ja observamos esta requisicao pelo send anterior? O listener so pode
+      // pertencer a chamada atual, mas o XHR reaproveitado pode ter disparado
+      // um load antigo em viagem. O once ja impede duplicatas; este check
+      // protege o caso raro de recarga em voo.
       const url = xhr.__mlmetricsUrl || "";
       window.__mlmetricsUrls.push(url);
 
@@ -147,7 +157,7 @@
       if (ehSuspeito(url) || ehSuspeito(corpo)) {
         reportar("xhr", url, corpo);
       }
-    });
+    }, { once: true });
 
     return sendOriginal.apply(this, arguments);
   };

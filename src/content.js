@@ -228,9 +228,28 @@
   }
 
   /**
+   * Botao que fecha o painel.
+   *
+   * O painel e fixo na tela e nao faz parte do layout do ML; sem como fecha-lo
+   * e preciso recarregar a pagina para faze-lo sumir. O botao remove o painel;
+   * o proximo navegar/render volta a mostra-lo, entao o uso normal continua.
+   */
+  function criarBotaoFechar(painel) {
+    const botao = document.createElement("button");
+    botao.type = "button";
+    botao.className = PREFIXO + "-fechar";
+    botao.title = "Fechar painel";
+    botao.textContent = "×";
+    botao.addEventListener("click", function () {
+      painel.remove();
+    });
+    return botao;
+  }
+
+  /**
    * Monta e insere o painel na pagina.
    */
-  function montarPainel(codigo, metricas, capturadoEm) {
+  function montarPainel(metricas, capturadoEm) {
     // O ML e uma SPA: navegar entre produtos nao recarrega a pagina, entao
     // este script pode rodar de novo. Removemos o painel anterior em vez de
     // so desistir, senao ficariamos exibindo os dados do produto antigo.
@@ -243,32 +262,47 @@
     const titulo = document.createElement("div");
     titulo.className = PREFIXO + "-titulo";
     titulo.textContent = "ML Metrics";
+    painel.appendChild(criarBotaoFechar(painel));
     painel.appendChild(titulo);
 
-    painel.appendChild(criarLinha(
+    // A ultima linha vem seguida do rodape de status. Sem isto, uma borda
+    // solta de divisor fica fazendo par entre a ultima metrica e o rodape.
+    const linhas = [];
+
+    linhas.push(criarLinha(
       "Visitas totais",
       metricas.visitas !== null ? metricas.visitas.toLocaleString("pt-BR") : null
     ));
 
-    painel.appendChild(criarLinha(
+    linhas.push(criarLinha(
       "Vendas",
       metricas.vendas !== null ? metricas.vendas.toLocaleString("pt-BR") : null
     ));
 
-    painel.appendChild(criarLinha(
+    linhas.push(criarLinha(
       "Conversão",
       metricas.conversao !== null ? metricas.conversao.toFixed(1) + "%" : null
     ));
 
-    painel.appendChild(criarLinha(
+    linhas.push(criarLinha(
       "Vende a cada",
       metricas.visitasPorVenda !== null ? metricas.visitasPorVenda + " visitas" : null
     ));
 
-    painel.appendChild(criarLinha(
+    linhas.push(criarLinha(
       "Receita estimada",
       metricas.receita !== null ? formatarReais(metricas.receita) : null
     ));
+
+    linhas.forEach(function (linha) {
+      painel.appendChild(linha);
+    });
+
+    // A ultima linha nao ganha divisor embaixo: o rodape ja separa do mundo.
+    // A marca (PREFIXO "-ultima") e aplicada por JS porque CSS nao sabe, de
+    // forma confiavel, "a ultima linha do grupo": last-of-type contaria as
+    // DIVs e o rodape e uma div tambem.
+    linhas[linhas.length - 1].className += " " + PREFIXO + "-ultima";
 
     const rodape = document.createElement("div");
     rodape.className = PREFIXO + "-status";
@@ -308,6 +342,7 @@
       "Sem dados deste anúncio ainda. Abra \"Minhas publicações\" " +
       "uma vez para a extensão capturar as métricas.";
 
+    painel.appendChild(criarBotaoFechar(painel));
     painel.appendChild(titulo);
     painel.appendChild(aviso);
     document.body.appendChild(painel);
@@ -357,7 +392,7 @@
           return;
         }
 
-        montarPainel(codigoNoInicio, calcular(dados, lerPreco()), dados.capturadoEm);
+        montarPainel(calcular(dados, lerPreco()), dados.capturadoEm);
       });
     } catch (e) {
       // contexto invalidado: o painel antigo sai, a proxima leitura tenta.
@@ -391,4 +426,21 @@
     // e precisamos do preco do produto NOVO, nao do que ainda esta na tela.
     setTimeout(atualizar, 500);
   }, 1000);
+
+  // Reage a captura em tempo real: quando o coletor grava dados novos para o
+  // anuncio que esta na tela, o painel atualiza sozinho, sem esperar o poller
+  // de URL ou um navegar. Sem este listener o vendedor teria de recarregar a
+  // pagina para ver numeros que ja foram capturados ha segundos.
+  try {
+    chrome.storage.onChanged.addListener(function (mudancas, area) {
+      // area "local" = chrome.storage.local; sync nao e usada por nos.
+      if (area !== "local") return;
+      if (!mudancas[CHAVE_CACHE]) return;
+
+      // A URL ja foi conferida por extrairCodigoAnuncio dentro de atualizar.
+      atualizar();
+    });
+  } catch (e) {
+    // contexto invalidado: sem reacao em tempo real, o poller de URL cobre.
+  }
 })();

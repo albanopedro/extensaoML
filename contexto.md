@@ -536,5 +536,5 @@ paramos.
 | 3 — Escopo | ✅ feito | 11/09/2026 | #3, #7, #10. |
 | 4 — Confiança | ✅ feito | 11/09/2026 | #8, #9, #19, #16, #18. Limite conhecido do #8: merge ainda carimba data unica (por anuncio, nao por metrica). |
 | 5 — Robustez | ✅ feito | 11/09/2026 | #13, #11, #12, #21. A fila `comCache` serializa get/set na mesma aba; entre abas a corrida persiste (depende do service worker do lote 6). |
-| 6 — Rede | ⬜ pendente | — | — |
-| 7 — Acabamento | ⬜ pendente | — | — |
+| 6 — Rede | ⬜ pendente | — | #6 precisa decisao (service worker); #17 sem Web Accessible Resources; #20 snapshots HTML/JSON; #32 documentar em INSTRUCOES-CLIENTE. |
+| 7 — Acabamento | ✅ feito | 11/09/2026 | #15, #22, #25, #26, #27, #28, #30, #31. #15 em sniffer (fora do manifest prod.). #25 ja feito no #11. |

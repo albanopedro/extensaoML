@@ -12,7 +12,7 @@
     "128": "icons/icon128.png"
   },
 
-  "permissions": ["storage"],
+  "permissions": ["storage", "clipboardWrite"],
 
   "action": {
     "default_popup": "src/popup.html",
