@@ -534,7 +534,7 @@ paramos.
 | 1 — Empacotamento | ✅ feito | 11/09/2026 | #5, #14, #29. #33 ja nao existia (não achei .swp). |
 | 2 — Parsing | ✅ feito | 11/09/2026 | #1, #2, #4, #23, #24. Datas foram além do #1: nova funcao `ehData`. Validado em Node (test_parsing), TODOS PASSARAM. |
 | 3 — Escopo | ✅ feito | 11/09/2026 | #3, #7, #10. |
-| 4 — Confiança | ⬜ pendente | — | — |
+| 4 — Confiança | ✅ feito | 11/09/2026 | #8, #9, #19, #16, #18. Limite conhecido do #8: merge ainda carimba data unica (por anuncio, nao por metrica). |
 | 5 — Robustez | ⬜ pendente | — | — |
 | 6 — Rede | ⬜ pendente | — | — |
 | 7 — Acabamento | ⬜ pendente | — | — |

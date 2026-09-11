@@ -554,6 +554,13 @@
   function salvar(novos) {
     if (Object.keys(novos).length === 0) return;
 
+    const AGORA = Date.now();
+
+    // De quanto em quanto tempo o "capturadoEm" de um anuncio ESTAVEL e
+    // renovado. Reconfirmar a cada varredura gravaria no storage a cada
+    // 600ms sem parar; 2 minutos equilibra frescor com nao pesar em I/O.
+    const INTERVALO_RENOVACAO_MS = 2 * 60 * 1000;
+
     chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
       // Se for a primeira vez, nao existe nada guardado ainda.
       const cache = guardado[CHAVE_CACHE] || {};
@@ -564,13 +571,25 @@
       // dispara a cada alteracao do DOM, e mostrar o aviso verde altera o
       // DOM. Sem esta trava, avisar provocaria nova varredura, que avisaria
       // de novo - um loop infinito.
-      const codigos = Object.keys(novos).filter(function (codigo) {
+      const mudancas = Object.keys(novos).filter(function (codigo) {
         return mudou(cache[codigo], novos[codigo]);
       });
 
-      if (codigos.length === 0) return;
+      // Anuncios ja conhecidos, com numeros IGUAIS ao que a tela mostra.
+      // Nao mudaram, mas foram RECONFIRMADOS agora. Sem esta renovacao, um
+      // anuncio estavel nunca anda a data e o painel passa a gritar "dados
+      // de N dias atras" logo depois de ter sido reconferido - fazendo a
+      // vendedora concluir que a extensao quebrou.
+      const aRenovar = Object.keys(novos).filter(function (codigo) {
+        if (mudancas.indexOf(codigo) !== -1) return false;
+        const anterior = cache[codigo];
+        if (!anterior) return false; // sem registro, foi para mudancas
+        return AGORA - (anterior.capturadoEm || 0) >= INTERVALO_RENOVACAO_MS;
+      });
 
-      codigos.forEach(function (codigo) {
+      if (mudancas.length === 0 && aRenovar.length === 0) return;
+
+      mudancas.forEach(function (codigo) {
         // Object.assign copia da esquerda para a direita, entao o que vem
         // depois vence. A ordem importa e diz a regra de atualizacao:
         //
@@ -585,19 +604,28 @@
         cache[codigo] = Object.assign({}, cache[codigo], novos[codigo], {
           // Data da captura. Permite exibir "dado de 3 dias atras"
           // em vez de mostrar numero velho como se fosse de agora.
-          capturadoEm: Date.now()
+          capturadoEm: AGORA
         });
       });
 
-      chrome.storage.local.set({ [CHAVE_CACHE]: cache }, function () {
-        console.log(
-          "%c[ML METRICS]%c capturei " + codigos.length + " anuncio(s):",
-          "background:#3483fa;color:#fff;padding:2px 6px;border-radius:3px",
-          "color:#3483fa",
-          novos
-        );
+      // So a data anda; os numeros continuam os mesmos.
+      aRenovar.forEach(function (codigo) {
+        cache[codigo].capturadoEm = AGORA;
+      });
 
-        avisarNaTela(codigos.length);
+      chrome.storage.local.set({ [CHAVE_CACHE]: cache }, function () {
+        // So anunciamos quando algo de fato MUDOU. Reconhecer de novo sem
+        // novidade nao merece toast a cada 2 minutos.
+        if (mudancas.length > 0) {
+          console.log(
+            "%c[ML METRICS]%c capturei " + mudancas.length + " anuncio(s):",
+            "background:#3483fa;color:#fff;padding:2px 6px;border-radius:3px",
+            "color:#3483fa",
+            novos
+          );
+
+          avisarNaTela(mudancas.length);
+        }
       });
     });
   }

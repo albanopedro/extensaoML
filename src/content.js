@@ -75,9 +75,25 @@
       if (!isNaN(valor)) return valor;
     }
 
-    const fracao = document.querySelector(".andes-money-amount__fraction");
+    // Plano B: o componente de preco. O "primeiro da pagina" costuma ser o
+    // RISCADO (antes do desconto) ou a parcela - por isso filtramos: pulamos
+    // os elementos com texto tachado (line-through) e pegamos o primeiro
+    // que sobra. E uma heuristica e pode seguir errada, mas deixa de
+    // exagerar a receita por ordem de grandeza.
+    const fracoes = document.querySelectorAll(".andes-money-amount__fraction");
 
-    if (fracao) {
+    for (let i = 0; i < fracoes.length; i++) {
+      const fracao = fracoes[i];
+
+      // parentElement e o andes-money-amount que carrega o estilo riscado.
+      const estilo = fracao.parentElement
+        ? getComputedStyle(fracao.parentElement)
+        : null;
+
+      if (estilo && estilo.textDecorationLine.indexOf("line-through") !== -1) {
+        continue;
+      }
+
       // Aqui o texto esta no formato brasileiro ("1.234"), entao o ponto
       // e separador de milhar e precisa sumir antes de converter.
       const limpo = fracao.textContent.split(".").join("").trim();
@@ -153,22 +169,28 @@
     const visitas = dados.visitas;
     const vendas = dados.vendas;
 
-    const temAmbos = (visitas > 0 && vendas > 0);
+    // "Pelo menos um definido" e diferente de "maior que zero". O caso de
+    // 500 visitas e 0 vendas PRECISA mostrar "0%" - zero e um dado real
+    // (ninguem comprou), nao uma ausencia. So null sinaliza "nao sei".
+    const temAmbos = (visitas !== undefined && vendas !== undefined);
+
+    // visitasPorVenda e receita dividem por vendas: com 0 vendas nao ha o
+    // que calcular, entao essas duas continuam exigindo vendas > 0.
+    const temVendas = (vendas !== undefined && vendas > 0);
 
     return {
       visitas: (visitas !== undefined) ? visitas : null,
       vendas: (vendas !== undefined) ? vendas : null,
 
-      // Porcentagem de visitas que viraram venda.
+      // 0% e dado (converteu nada); null e ausencia (nao sei).
       conversao: temAmbos ? (vendas / visitas) * 100 : null,
 
-      // Quantas visitas, em media, para sair uma venda.
       // Math.round porque "vende a cada 7,18 visitas" nao ajuda ninguem.
-      visitasPorVenda: temAmbos ? Math.round(visitas / vendas) : null,
+      visitasPorVenda: temVendas ? Math.round(visitas / vendas) : null,
 
       // Receita bruta acumulada. E estimativa: assume que todas as vendas
       // sairam pelo preco atual, o que ignora promocoes passadas.
-      receita: (vendas > 0 && preco) ? vendas * preco : null
+      receita: temVendas && preco ? vendas * preco : null
     };
   }
 
@@ -300,11 +322,16 @@
    * preciso - cada chamada substitui o painel anterior.
    */
   function atualizar() {
-    const codigo = extrairCodigoAnuncio();
+    // Guardamos o codigo no momento da chamada. A leitura do storage e
+    // assincrona, e navegar rapido entre anuncios pode fazer o callback
+    // voltar depois que a URL ja mudou de novo (condicao de corrida). Sem
+    // esta conferencia, o painel do anuncio A desenharia sobre a pagina de
+    // B. Se a URL mudou, a proximima chamada deste poller resolve.
+    const codigoNoInicio = extrairCodigoAnuncio();
 
     // Saiu de uma pagina de anuncio (foi para a home, busca, carrinho).
     // Tiramos o painel: melhor nada do que numeros de outro produto.
-    if (!codigo) {
+    if (!codigoNoInicio) {
       const anterior = document.getElementById(PREFIXO + "-painel");
       if (anterior) anterior.remove();
       return;
@@ -313,15 +340,21 @@
     // chrome.storage e assincrono: devolve por callback, nao por retorno.
     // Toda a montagem do painel acontece dentro dele, ja com o dado em maos.
     chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
+      // A pagina mudou enquanto o storage respondia: nada a fazer aqui.
+      if (extrairCodigoAnuncio() !== codigoNoInicio) return;
+
       const cache = guardado[CHAVE_CACHE] || {};
-      const dados = cache[codigo];
+      const dados = cache[codigoNoInicio];
 
       if (!dados) {
-        montarPainelVazio();
+        // So mostramos o painel vazio quando HA outros anuncios capturados.
+        // Se o cache esta vazio, a pessoa provavelmente esta navegando como
+        // compradora - o painel so faria ruido sobre todo produto que abrir.
+        if (Object.keys(cache).length > 0) montarPainelVazio();
         return;
       }
 
-      montarPainel(codigo, calcular(dados, lerPreco()), dados.capturadoEm);
+      montarPainel(codigoNoInicio, calcular(dados, lerPreco()), dados.capturadoEm);
     });
   }
 
