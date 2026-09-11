@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+
+  "name": "ML Metrics",
+  "version": "0.1.0",
+  "description": "Mostra metricas de desempenho em anuncios do Mercado Livre.",
+
+  "content_scripts": [
+    {
+      "matches": ["https://*.mercadolivre.com.br/*"],
+      "js": ["src/content.js"],
+      "css": ["src/content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.mercadolivre.com.br/*"],
+      "js": ["src/sniffer.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
