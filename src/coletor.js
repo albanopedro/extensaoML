@@ -34,12 +34,12 @@
   // dependendo da tela. Repare que "vendido" NAO contem "venda" - por isso
   // precisam ser termos separados, e nao um prefixo curto como "vend"
   // (que pegaria "Vender um igual" e sujaria o resultado).
-  // Nao sabemos qual destas palavras o ML usa nas telas de vendedor, entao
-  // cobrimos as variantes plausiveis. Usamos raizes curtas onde a flexao
-  // muda o fim da palavra: "visualiz" pega "visualizacoes" e "visualizações"
-  // (com e sem acento), que seriam duas entradas separadas.
+  //
+  // Nao usamos "visualiz" para visitas: toda tela de vendedor tem o botao
+  // "Visualizar anúncio", e o numero colado antes dele (estoque, posicao na
+  // lista) seria lido como visitas. "visita" cobre o rotulo que o ML usa.
   const ROTULOS = {
-    visitas: ["visita", "visualiz"],
+    visitas: ["visita"],
     vendas: ["venda", "vendido", "vendida"]
   };
 
@@ -77,10 +77,16 @@
    * "1.234" no Brasil significa mil duzentos e trinta e quatro: o ponto e
    * separador de MILHAR e precisa sumir antes de converter.
    *
+   * Se o texto contem virgula, e um preco decimal (1.234,56) e nao uma
+   * metrica inteira - retornamos null para rejeitar.
+   *
    * @param {string} bruto ex: "1.234"
    * @returns {number|null}
    */
   function paraInteiro(bruto) {
+    // Virgula indica centavos/preco decimal - metricas sao sempre inteiras.
+    if (bruto.indexOf(",") !== -1) return null;
+
     // split(".").join("") remove TODOS os pontos, nao so o primeiro.
     const numero = parseInt(bruto.split(".").join(""), 10);
 
@@ -104,6 +110,12 @@
    * Quando ha varios numeros antes, ficamos com o ULTIMO - e o mais
    * proximo do rotulo, entao o mais provavel de ser o valor dele.
    *
+   * Procuramos a ULTIMA ocorrencia do rotulo, nao a primeira. Telas de
+   * vendedor repetem o mesmo rotulo em recortes lado a lado ("visitas
+   * hoje" e "visitas totais"); a ultima costuma ser o total, que e o que
+   * interessa. E com duas varreduras competindo, a regra do "maior valor"
+   * em varrerPagina() decide - aproveitando o que ela ja sabe fazer.
+   *
    * @param {string} texto
    * @param {string} palavra rotulo procurado, em minusculo
    * @returns {number|null}
@@ -111,7 +123,7 @@
   function numeroAntesDe(texto, palavra) {
     if (!texto) return null;
 
-    const posicao = texto.toLowerCase().indexOf(palavra);
+    const posicao = texto.toLowerCase().lastIndexOf(palavra);
     if (posicao === -1) return null;
 
     // Primeiro tentamos antes do rotulo, que e a ordem natural em portugues.
@@ -125,7 +137,7 @@
     // ficaria no caminho e seria lido como palavra estranha.
     const depois = texto
       .slice(posicao + palavra.length)
-      .replace(/^[a-zA-ZÀ-ú]+/, "");
+      .replace(/^[a-zA-Z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF]+/, "");
 
     return primeiroNumeroColado(depois);
   }
@@ -150,13 +162,22 @@
   function ultimoNumeroColado(trecho) {
     // matchAll devolve cada ocorrencia COM a posicao onde ela comeca -
     // e a posicao que permite medir o vao ate o rotulo.
-    const numeros = Array.from(trecho.matchAll(/\d[\d.]*/g));
+    //
+    // A regex inclui virgula (\d[\d.,]*) para capturar precos inteiros
+    // (ex: "1.234,56") como um so match, em vez de dividir centavos do
+    // valor. Depois, paraInteiro() rejeita qualquer match que contenha
+    // virgula - centavos nao sao metricas inteiras.
+    const numeros = Array.from(trecho.matchAll(/\d[\d.,]*/g));
     if (numeros.length === 0) return null;
 
     const ultimo = numeros[numeros.length - 1];
     const vao = trecho.slice(ultimo.index + ultimo[0].length);
 
     if (temLetra(vao)) return null;
+
+    // O ultimo numero e uma data brasileira? "Publicado em 01.02.2023
+    // visitas" nao tem valor nenhum - rejeitamos o trecho inteiro.
+    if (ehData(ultimo[0])) return null;
 
     return paraInteiro(ultimo[0]);
   }
@@ -169,23 +190,56 @@
    * @returns {number|null}
    */
   function primeiroNumeroColado(trecho) {
-    const encontrado = trecho.match(/\d[\d.]*/);
+    // Mesma logica de ultimoNumeroColado: incluimos virgula para capturar
+    // precos como match unico, e paraInteiro rejeita depois.
+    const encontrado = trecho.match(/\d[\d.,]*/);
     if (!encontrado) return null;
 
     const vao = trecho.slice(0, encontrado.index);
 
     if (temLetra(vao)) return null;
 
+    // O numero e o DIA de uma data? "Visitas 01/02/2023" daria 1 visita
+    // pela leitura normal - rejeitamos o trecho inteiro.
+    const depoisDoNumero = trecho.slice(encontrado.index + encontrado[0].length);
+    if (ehData(encontrado[0] + depoisDoNumero)) return null;
+
     return paraInteiro(encontrado[0]);
   }
 
   /**
-   * Diz se ha alguma letra no texto. O intervalo À-ú cobre os acentos
-   * do portugues, senao "visitas nos últimos" passaria como se nao
-   * tivesse letras entre o numero e o rotulo.
+   * Diz se ha alguma letra no texto.
+   *
+   * Um intervalo unico "À-ú" (U+00C0-U+00FA) seria torto: inclui "×" (U+00D7)
+   * e "÷" (U+00F7), que nao sao letras, e exclui "ü", "ý" e "ÿ". Por isso
+   * usamos tres intervalos que pulam os simbolos e pegam os acentos do
+   * portugues mais os diacriticos comuns:
+   *   A-Z  a-z  À-Ö  Ø-ö  ø-ÿ
    */
   function temLetra(texto) {
-    return /[a-zA-ZÀ-ú]/.test(texto);
+    return /[a-zA-Z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF]/.test(texto);
+  }
+
+  /**
+   * Diz se um texto comeca com uma data brasileira valida (DD/MM/AAAA ou
+   * DD.MM.AAAA, dia 01-31 e mes 01-12).
+   *
+   * Existe para que um trecho como "Publicado em 01.02.2023 visitas" nao
+   * entregue o ano como metrica. Checar MES e DIA e essencial, senao um
+   * milhar grande com dois pontos ("1.299.500 visitas") seria rejeitado
+   * como se fosse data.
+   *
+   * @param {string} texto
+   * @returns {boolean}
+   */
+  function ehData(texto) {
+    const m = texto.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})/);
+    if (!m) return false;
+
+    const dia = parseInt(m[1], 10);
+    const mes = parseInt(m[2], 10);
+
+    return mes >= 1 && mes <= 12 && dia >= 1 && dia <= 31;
   }
 
   /**
@@ -202,7 +256,13 @@
     // Caso mais facil: a propria URL da pagina ja identifica o anuncio.
     // Vale quando estamos na tela de metricas de UM anuncio especifico -
     // ali a pagina inteira fala de um produto so, entao o limite e o body.
-    const naUrl = url.match(PADRAO_CODIGO);
+    //
+    // So olhamos o PATH da URL, nunca a query string. Telas de vendedor
+    // carregam "MLB..." em parametros de filtro ou retorno (?item_id=MLB123);
+    // se testassemos a URL completa, uma listagem inteira seria atribuida a
+    // um unico codigo com limite = body. O MLB de anuncio de verdade fica
+    // sempre no caminho (produto.mercadolivre.com.br/MLB-123...-p/MLB123...).
+    const naUrl = url.split("?")[0].match(PADRAO_CODIGO);
     if (naUrl) {
       return { codigo: naUrl[1] + naUrl[2], limite: doc.body };
     }
@@ -286,15 +346,22 @@
    * @param {string} palavra
    * @returns {number|null}
    */
-  function valorDoRotulo(elemento, palavra, limite) {
+  function valorDoRotulo(elemento, palavra, limite, doc) {
     let atual = elemento;
 
     // Subimos no maximo ate o LIMITE - o elemento que delimita este anuncio.
     // Sem essa trava, um rotulo em card sem numero faria a busca continuar
     // subindo e encontrar o numero do anuncio de baixo.
     for (let nivel = 0; nivel < 5 && atual; nivel++) {
-      const valor = numeroAntesDe(atual.textContent, palavra);
-      if (valor !== null) return valor;
+      // Nunca lemos o textContent do BODY. Quando o codigo veio da URL
+      // (limite = doc.body), uma pagina rasa alcanca o body em poucos
+      // niveis - e o texto vira a pagina inteira, deixando o rotulo buscar
+      // numero em regiao nao relacionada. Antes de ler, recuamos um nivel
+      // quando o atual e o body.
+      if (atual !== doc.body) {
+        const valor = numeroAntesDe(atual.textContent, palavra);
+        if (valor !== null) return valor;
+      }
 
       // Chegamos na fronteira do anuncio: daqui para cima ja e territorio
       // de outro, entao paramos mesmo sem ter achado nada.
@@ -311,6 +378,33 @@
   // --------------------------------------------------------------------------
 
   /**
+   * Filtro do TreeWalker: diz se um no de texto deve ser examinado.
+   *
+   * SHOW_TEXT sozinho inclui o texto dentro de <script>, <style>, <template>
+   * e de conteudos ocultos. O ML embute JSONs gigantes em <script> com
+   * campos "visits" e "sold_quantity" ao lado de milhares de numeros - se
+   * um desses nos fosse lido, um numero do JSON entraria como metrica.
+   * Alem disso, varrer esse texto e caro: centenas de KB copiadas em
+   * minusculo a cada subida do DOM.
+   *
+   * @param {Node} no
+   * @returns {number} NodeFilter.FILTER_ACCEPT ou FILTER_REJECT
+   */
+  function aceitarNoDeTextoTecnico(no) {
+    const pai = no.parentElement;
+
+    // Sem pai, nao temos como saber o contexto - aceitamos por seguranca.
+    if (!pai) return NodeFilter.FILTER_ACCEPT;
+
+    // Rejeita nos dentro de script, style e template.
+    if (pai.closest("script, style, template")) {
+      return NodeFilter.FILTER_REJECT;
+    }
+
+    return NodeFilter.FILTER_ACCEPT;
+  }
+
+  /**
    * Percorre todos os textos da pagina procurando rotulos de metrica.
    *
    * Usamos TreeWalker em vez de querySelectorAll("*") porque ele percorre
@@ -325,7 +419,8 @@
 
     const caminhante = doc.createTreeWalker(
       doc.body,
-      NodeFilter.SHOW_TEXT  // so nos de texto, ignora tags e comentarios
+      NodeFilter.SHOW_TEXT,  // so nos de texto, ignora tags e comentarios
+      aceitarNoDeTextoTecnico  // mas NAO o texto de script/style/template
     );
 
     let no = caminhante.nextNode();
@@ -356,7 +451,7 @@
             if (!contexto) return;
 
             const codigo = contexto.codigo;
-            const valor = valorDoRotulo(elemento, palavra, contexto.limite);
+            const valor = valorDoRotulo(elemento, palavra, contexto.limite, doc);
 
             // So guardamos com as duas pontas: de qual anuncio, e quanto.
             if (valor === null) return;
@@ -551,17 +646,23 @@
    * O coletor existe para as telas de vendedor, onde cada numero pertence
    * ao anuncio do seu card. Aqui a extensao so exibe, nunca captura.
    *
-   * Detectamos pelos botoes de compra, que sao o que define esta pagina.
-   * Usamos textContent em vez de innerText de proposito: innerText calcula
-   * o layout da pagina inteira, o que seria caro para rodar a cada varredura.
+   * Detectamos pelo HOST da URL: a vitrine publica do produto fica num
+   * subdominio proprio (produto.mercadolivre.com.br) que nenhuma tela de
+   * vendedor usa. Comparar texto nao e confiavel - as palavras dos botoes
+   * mudam e, pior, qualquer ocorrencia delas num <script> ou template
+   * oculto desligaria o coletor sem deixar rastro. E ler o textContent de
+   * toda a pagina, incluindo os JSONs dos scripts, era caro a cada varredura.
+   *
+   * O parametro doc fica para preservar a assinatura de chamada, mas a
+   * decisao agora vem da URL.
    *
    * @returns {boolean}
    */
   function ehPaginaDeCompra(doc) {
-    const texto = doc.body.textContent.toLowerCase();
+    const host = window.location.hostname;
 
-    return texto.indexOf("adicionar ao carrinho") !== -1 ||
-           texto.indexOf("comprar agora") !== -1;
+    return host.indexOf("produto.mercadolivre") !== -1 ||
+           host.indexOf("articulo.mercadolivre") !== -1;
   }
 
   /**
@@ -699,7 +800,13 @@
    */
   function salvarDiagnostico() {
     const amostras = [];
-    const caminhante = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    // Mesmo filtro de varrerPagina: o texto de <script>/<style> do ML embute
+    // JSONs com palavras-chave, que sujariam o diagnostico com lixo.
+    const caminhante = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+      aceitarNoDeTextoTecnico
+    );
 
     let no = caminhante.nextNode();
 
