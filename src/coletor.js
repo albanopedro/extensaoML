@@ -566,7 +566,7 @@
   //
   // O chrome.storage nao oferece leitura-modificacao-escrita atomica: entre
   // o get e o set, outra operacao pode entrar e gravar por cima. Encadear
-   // tudo numa fila unica impede que duas varre duras rapidas da MESMA aba se
+  // tudo numa fila unica impede que duas varreduras rapidas da MESMA aba se
   // pisem - o que acontecia com o aviso verde provocando re-varredura.
   // Entre abas DISTINTAS a corrida continua: resolver exigiria centralizar
   // a escrita num service worker (o lote 6 da revisao).
