@@ -17,6 +17,12 @@
 
   const CHAVE_CACHE = "mlmetrics_dados";
   const CHAVE_DIAGNOSTICO = "mlmetrics_diagnostico";
+  // Telas de vendedor que ja entregaram numeros. Entram no relatorio copiado
+  // para o diagnostico remoto dizer QUAIS telas a extensao reconheceu - e
+  // para nos mostrarmos o endereco exato de "Minhas publicacoes" sem o usuario
+  // precisar navegar ate ele. Nao e dado novo: o coletor ja guarda estas
+  // URLs; o popup so as inclui quando o botao e clicado.
+  const CHAVE_ORIGENS = "mlmetrics_origens";
 
   const resumo = document.getElementById("resumo");
   const lista = document.getElementById("lista");
@@ -108,24 +114,30 @@
 
   document.getElementById("copiar").addEventListener("click", function () {
     try {
-      chrome.storage.local.get([CHAVE_CACHE, CHAVE_DIAGNOSTICO], function (guardado) {
-        if (chrome.runtime.lastError) return;  // contexto invalidado
+      chrome.storage.local.get(
+        [CHAVE_CACHE, CHAVE_DIAGNOSTICO, CHAVE_ORIGENS],
+        function (guardado) {
+          if (chrome.runtime.lastError) return;  // contexto invalidado
 
-        // JSON.stringify com indentacao 2 gera texto legivel para colar
-        // numa conversa, em vez de uma linha unica gigante.
-        const relatorio = JSON.stringify({
-          versao: chrome.runtime.getManifest().version,
-          geradoEm: new Date().toISOString(),
-          capturado: guardado[CHAVE_CACHE] || {},
-          diagnostico: guardado[CHAVE_DIAGNOSTICO] || null
-        }, null, 2);
+          // JSON.stringify com indentacao 2 gera texto legivel para colar
+          // numa conversa, em vez de uma linha unica gigante.
+          const relatorio = JSON.stringify({
+            versao: chrome.runtime.getManifest().version,
+            geradoEm: new Date().toISOString(),
+            // As telas de vendedor reconhecidas (até 3). Sao o caminho mais
+            // direto para confirmar que estamos olhando a página certa.
+            origens: guardado[CHAVE_ORIGENS] || [],
+            capturado: guardado[CHAVE_CACHE] || {},
+            diagnostico: guardado[CHAVE_DIAGNOSTICO] || null
+          }, null, 2);
 
-        navigator.clipboard.writeText(relatorio).then(function () {
-          avisar("Copiado. Cole na conversa.");
-        }).catch(function () {
-          avisar("Não consegui copiar.");
-        });
-      });
+          navigator.clipboard.writeText(relatorio).then(function () {
+            avisar("Copiado. Cole na conversa.");
+          }).catch(function () {
+            avisar("Não consegui copiar.");
+          });
+        }
+      );
     } catch (e) {
       // contexto invalidado: popup inteiro e recarregado pelo navegador
     }

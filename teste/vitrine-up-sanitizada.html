@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Kit 2 Caixa Organizadora (SANITIZADO) | Mercado Livre</title>
+<!--
+  Fixture SANITIZADA da estrutura real de /up/ que gerou os bugs #34/#35/#36
+  (pagina real: teste/MLreal.html, que NAO pode ser commitada - tem dados de
+  produto/vendedor). Todos os valores e URLs abaixo sao ficticios.
+
+  O que esta pagina representa: vitrine PUBLICA de compra na estrutura nova
+  (host www, rota /up/MLBU...). Ela tem "Comprar agora", "Adicionar ao
+  carrinho" e carrega a faixa "Mais vendidos" com "+N vendidos" de OUTROS
+  produtos. Nenhum texto do conteudo menciona "visita" - so "vendido/vendas".
+
+  Dupla protecao que esta fixture exercita:
+   1. ehPaginaDeCompra(url) detecta a rota /up/MLBU... e nem chega ao coletor.
+   2. paginaMencionaVisita(): sem "visita" no conteudo, varrerPagina retorna {}
+      ANTES de ler qualquer "+N vendidos".
+  Mas se a extensao ja tivesse injetado o painel e a pagina fosse salva, o
+  painel diria "Visitas totais" - as unicas mencoes a "visita" da pagina.
+  Elas moram DENTRO de #mlmetrics-painel e sao ignoradas pela trava.
+-->
+<link rel="canonical" href="https://www.mercadolivre.com.br/kit-2-caixa-organizadora-modular/up/MLBU0000000001">
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="/">Inicio</a> &gt; <a href="/caixas-organizadoras">Caixas organizadoras</a>
+    </nav>
+  </header>
+  <main>
+    <div class="produto-titulo">
+      <h1>Kit 2 Caixa Organizadora Modular Empilhável</h1>
+      <p class="condicao">Novo | 1 vendido</p>
+    </div>
+    <section class="preco">
+      <p>R$ 19,90</p>
+      <button class="comprar">Comprar agora</button>
+      <button class="adicionar">Adicionar ao carrinho</button>
+    </section>
+    <section class="mais-vendidos">
+      <h2>Mais vendidos</h2>
+      <div class="card">
+        <a href="https://www.mercadolivre.com.br/organizador-de-gavetas/p/MLB0000000002">Organizador de gavetas</a>
+        <span>+100 vendidos</span>
+      </div>
+      <div class="card">
+        <a href="https://www.mercadolivre.com.br/estojo-organizador/p/MLB0000000003">Estojo organizador</a>
+        <span>+25 vendidos</span>
+      </div>
+      <div class="card">
+        <a href="https://www.mercadolivre.com.br/caixa-plastica-transparente/p/MLB0000000004">Caixa plástica transparente</a>
+        <span>+1.000 vendidos</span>
+      </div>
+    </section>
+  </main>
+  <footer>Mercado Livre — Nome Fictício, CEP 00000-000</footer>
+</body>
+</html>

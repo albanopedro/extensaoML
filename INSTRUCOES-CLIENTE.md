@@ -72,6 +72,20 @@ me diz:
 Nesse caso o print da tela de "Minhas publicações" me ajuda muito, porque é
 com base no que está escrito nela que eu ajusto o programa.
 
+### Atalho: em vez de print, "Copiar diagnóstico"
+
+Se você não conseguir mandar print, dá para mandar um relatório pronto, só com
+texto:
+
+1. Vá até a tela que quer me mostrar (por exemplo, "Minhas publicações").
+2. Clique no **ícone da extensão** (o quadradinho da ML Metrics no topo).
+3. Clique no botão **"Copiar diagnóstico"**.
+4. Cole o texto aqui na conversa.
+
+O relatório traz quais telas de vendedor a extensão reconheceu, os números
+guardados e — quando algo não foi capturado — pedaços do texto da tela. É a
+forma mais rápida de eu ver o que está acontecendo no seu navegador.
+
 ## Se quiser desinstalar
 
 Volte em `edge://extensions` (ou `chrome://extensions`) e clique em
