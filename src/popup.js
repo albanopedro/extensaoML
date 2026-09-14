@@ -27,6 +27,7 @@
   const resumo = document.getElementById("resumo");
   const lista = document.getElementById("lista");
   const aviso = document.getElementById("aviso");
+  const campoDiagnostico = document.getElementById("diagnostico");
 
   /**
    * Mostra uma mensagem temporaria no rodape do popup.
@@ -132,10 +133,17 @@
           }, null, 2);
 
           navigator.clipboard.writeText(relatorio).then(function () {
-            avisar("Copiado. Cole na conversa.");
+            avisar("Copiado. Cole aqui na conversa.");
           }).catch(function () {
-            avisar("Não consegui copiar.");
+            avisar("Clipboard bloqueado: selecione o texto abaixo e use Ctrl+C.");
           });
+
+          // O texto fica SEMPRE na tela, selecionado. A copia automatica e
+          // um atalho; se o navegador nao deixar, a pessoa copia na mao ou
+          // le o que esta escrito - sem depender do clipboard para nada.
+          campoDiagnostico.hidden = false;
+          campoDiagnostico.value = relatorio;
+          campoDiagnostico.select();
         }
       );
     } catch (e) {

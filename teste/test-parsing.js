@@ -532,6 +532,29 @@ const rPainel = varrerPagina(
 );
 testar("painel nao vira tela de vendedor", 0, Object.keys(rPainel).length);
 
+// Pagina que SO MENCIONA "visita" num banner e so "le" vendas: a passada
+// inicial deixa entrar (achou a palavra), mas nenhuma VISITA foi lida. E o
+// modo de falha real que poluiu o cache da vendedora (137 anuncios, ZERO
+// visitas): modulo publico "+1.000 vendidos" atribuido a produto alheio, com
+// um "visita" qualquer de propaganda na pagina. Regra final: sem visita
+// lida, nao ha captura.
+const corpoBannerVendido = elementoDa("body", {}, [
+  elementoDa("div", {}, [
+    textoDa("Receba produtos mais visitados na sua caixa de entrada")
+  ]),
+  elementoDa("section", {}, [
+    elementoDa("a", { href: "https://www.mercadolivre.com.br/kit-2-omni/up/MLBU5098517614" }, [
+      textoDa("Kit 2 Omnibox")
+    ]),
+    elementoDa("span", {}, [textoDa("+1.000 vendidos")])
+  ])
+]);
+const rBanner = varrerPagina(
+  documentoDa(corpoBannerVendido),
+  "https://www.mercadolivre.com.br/"
+);
+testar("banner com 'visita', so vendas: nada", 0, Object.keys(rBanner).length);
+
 // Painel presente numa pagina de vendedor de verdade: o painel e ignorado,
 // mas as metricas reais fora dele continuam valendo.
 const corpoPainelVendedor = elementoDa("body", {}, [

@@ -42,6 +42,16 @@ acesso seu de verdade, sem pressa nem repetições em série.
 
 5. Deve aparecer um quadrinho escrito **ML Metrics**. Instalação feita.
 
+## Depois de uma atualização
+
+Quando eu mandar uma versão nova, é preciso pedir ao navegador que recarregue
+a extensão — sem isso ela continua usando a versão antiga:
+
+1. Abra `edge://extensions` (ou `chrome://extensions`).
+2. No quadrinho da **ML Metrics**, clique no **ícone de recarregar** (a seta
+   circular que fica no canto do quadrinho).
+3. Pronto. Pode repetir o teste.
+
 ## Testando
 
 1. Entre no Mercado Livre e faça login normalmente.

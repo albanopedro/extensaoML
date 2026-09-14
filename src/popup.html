@@ -69,6 +69,23 @@
       text-align: center;
       min-height: 16px;
     }
+
+    /* O texto do diagnostico fica sempre visivel depois do botao, para
+       copiar na mao (Ctrl+C) quando o clipboard do navegador estiver
+       bloqueado - ou so para ler o que a extensao viu. */
+    #diagnostico {
+      width: 100%;
+      height: 140px;
+      box-sizing: border-box;
+      margin: 4px 0 12px;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 11px;
+      line-height: 1.45;
+      resize: vertical;
+    }
   </style>
 </head>
 <body>
@@ -81,6 +98,8 @@
 
 <button id="copiar" class="secundario">Copiar diagnóstico</button>
 <button id="limpar" class="perigo">Limpar dados guardados</button>
+
+<textarea id="diagnostico" readonly="" hidden=""></textarea>
 
 <div id="aviso"></div>
 

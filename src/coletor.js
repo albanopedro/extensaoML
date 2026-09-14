@@ -580,6 +580,18 @@
       no = caminhante.nextNode();
     }
 
+    // A regra que fecha o ciclo: so tela de VENDEDOR entrega numeros, e tela
+    // de vendedor SEMPRE mostra visitas. Se a pagina leu apenas vendas - com
+    // qualquer sobra de "visita" num banner ou modulo - ela e publica, com
+    // vendedores alheios, e os numeros achados nao prestam. O cache real que
+    // gerou esta regra tinha 137 anuncios "de dezenas de vendedores" e ZERO
+    // visitas: todos vieram de paginas publicas. Visitas e a metrica que a
+    // pagina publica nunca exibe, entao sem visita lida nao ha captura.
+    const leuVisitas = Object.keys(resultado).some(function (codigo) {
+      return resultado[codigo].visitas !== undefined;
+    });
+    if (!leuVisitas) return {};
+
     return descartarImplausiveis(resultado);
   }
 
