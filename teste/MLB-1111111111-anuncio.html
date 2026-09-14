@@ -21,7 +21,7 @@
 
 <div class="gabarito">
   <strong>Esperado no painel azul (canto superior direito):</strong><br>
-  <code>359</code> &middot; <code>50</code> &middot; <code>13.9%</code> &middot;
+  <code>359</code> &middot; <code>50</code> &middot; <code>13,9%</code> &middot;
   <code>7</code> &middot; <code>R$ 15.995,00</code><br>
   <small>
     Os rotulos foram omitidos de proposito. Escrever aqui o nome das
@@ -37,19 +37,20 @@
 <div class="produto">
   <h1>Capa Frontal Extrusora Original Creality K2 Plus</h1>
 
-  <!-- A classe imita o componente real de preco do ML.
-       Serve para exercitar a fonte 2 do lerPreco(), o plano B:
-       basta remover a tag <meta> la de cima para ver o fallback agir. -->
+  <!-- A classe imita o componente real de preco do ML. A extensao NAO usa
+       este preco visivel - so o dado estruturado (a <meta> la de cima ou um
+       JSON-LD). Remover a <meta> deve deixar a receita estimada em branco. -->
   <div class="preco">
     R$ <span class="andes-money-amount__fraction">319</span>,90
   </div>
 
   <p>Novo | 1 vendido</p>
 
-  <!-- O botao de compra e o que marca esta pagina como vitrine publica.
-       O coletor procura por ele para saber que NAO deve capturar aqui:
-       o "1 vendido" acima e do anuncio, mas a reputacao do vendedor
-       abaixo tambem fala em vendas, e as duas se confundiriam. -->
+  <!-- Pagina de anuncio: o coletor NAO captura aqui. A trava hoje e a
+       ausencia de "visita" no conteudo (e, no site real, a rota da URL) -
+       nao mais o botao de compra. O "1 vendido" acima e do anuncio, mas a
+       reputacao "+1.000 vendas" abaixo e do vendedor, e as duas se
+       confundiriam. -->
   <button>Comprar agora</button>
 
   <hr>

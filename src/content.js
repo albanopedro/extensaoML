@@ -35,10 +35,10 @@
   // parado, e longo o bastante para nao alarmar por causa de um fim de semana.
   const DIAS_PARA_ALERTA = 3;
 
-  // Codigo do anuncio cujo painel a pessoa fechou nesta aba. Para esse
-  // anuncio o painel nao volta sozinho - nem por gravacao nova no cache, nem
-  // pelo poller de URL. Vive so na memoria da aba: recarregar a pagina (F5)
-  // mostra o painel de novo.
+  // Pagina cujo painel a pessoa fechou nesta aba (a chave de chaveDaPagina).
+  // Para essa pagina o painel nao volta sozinho - nem por gravacao nova no
+  // cache, nem pelo poller de URL. Vive so na memoria da aba: recarregar a
+  // pagina (F5) mostra o painel de novo.
   let fechadoPara = null;
 
   // --------------------------------------------------------------------------
@@ -46,15 +46,81 @@
   // --------------------------------------------------------------------------
 
   /**
-   * Extrai o codigo do anuncio a partir da URL.
+   * Codigos que podem identificar o anuncio desta pagina, do mais confiavel
+   * para o menos.
    *
-   * @returns {string|null} null se nao for pagina de anuncio
+   * O ML usa tres espacos de codigo: o do ITEM (MLB-3456789012), que e o que
+   * a tela de vendedor usa e o que o coletor guarda; o do produto de CATALOGO
+   * (/p/MLB19655437); e o do user product (/up/MLBU...). Na vitrine, o
+   * caminho traz o de catalogo ou de user product, e o do ITEM vem nos
+   * parametros (pdp_filters=item_id:MLB..., item_id=MLB..., wid=MLB...).
+   * Pegar so o primeiro MLB da URL fazia o painel procurar o codigo errado e
+   * dizer "Sem dados" num anuncio que tinha dados.
+   *
+   * So olhamos os parametros que SABEMOS que carregam o item. Um MLB em
+   * qualquer outro parametro (busca, filtro) e ignorado: numa tela de
+   * vendedor com "?search=MLB...", isso punha painel onde nao devia.
+   *
+   * Recebe a URL por parametro para poder ser testada fora do navegador.
+   *
+   * @param {string} href endereco da pagina
+   * @returns {string[]} codigos distintos, na ordem de confianca
    */
-  function extrairCodigoAnuncio() {
-    const match = window.location.href.match(PADRAO_CODIGO);
+  function codigosDaPagina(href) {
+    const candidatos = [];
 
-    // match[1] e o prefixo ("MLB" ou "MLBU"), match[2] sao os digitos.
-    return match ? match[1] + match[2] : null;
+    function anotar(achado) {
+      if (!achado) return;
+
+      // achado[1] e o prefixo ("MLB" ou "MLBU"), achado[2] sao os digitos.
+      const codigo = achado[1] + achado[2];
+      if (candidatos.indexOf(codigo) === -1) candidatos.push(codigo);
+    }
+
+    let endereco;
+    try {
+      endereco = new URL(href);
+    } catch (e) {
+      return candidatos;
+    }
+
+    // Os parametros podem vir na query ou depois do "#": o ML usa os dois.
+    const grupos = [
+      endereco.searchParams,
+      new URLSearchParams(endereco.hash.replace(/^#/, ""))
+    ];
+
+    grupos.forEach(function (parametros) {
+      const filtros = parametros.get("pdp_filters") || "";
+      anotar(filtros.match(/item_id[:=](MLB[A-Z]?)-?(\d{6,})/));
+      anotar((parametros.get("item_id") || "").match(PADRAO_CODIGO));
+      anotar((parametros.get("wid") || "").match(PADRAO_CODIGO));
+    });
+
+    // Por ultimo, o caminho: na vitrine classica ele e o proprio item.
+    anotar(endereco.pathname.match(PADRAO_CODIGO));
+
+    return candidatos;
+  }
+
+  /**
+   * Chave da pagina atual: os codigos candidatos juntos, ou null se a pagina
+   * nao identifica anuncio nenhum. Serve para saber se a pagina mudou e para
+   * lembrar qual painel foi fechado.
+   *
+   * @returns {string|null}
+   */
+  function chaveDaPagina() {
+    const codigos = codigosDaPagina(window.location.href);
+    return codigos.length > 0 ? codigos.join("|") : null;
+  }
+
+  /**
+   * Tira o painel da tela, se houver.
+   */
+  function removerPainel() {
+    const anterior = document.getElementById(PREFIXO + "-painel");
+    if (anterior) anterior.remove();
   }
 
   /**
@@ -74,16 +140,20 @@
   }
 
   /**
-   * Le o preco do produto na pagina.
+   * Le o preco do produto nos DADOS ESTRUTURADOS da pagina.
    *
-   * Tentamos duas fontes, da mais confiavel para a menos:
+   * Duas fontes, as duas publicadas pelo ML para buscadores (Google Shopping
+   * etc.) - por isso estaveis, ja que quebra-las prejudicaria o SEO do
+   * proprio ML:
    *
-   * 1. <meta itemprop="price"> - dado estruturado que o ML publica para
-   *    buscadores (Google Shopping etc). E o formato mais estavel que existe
-   *    na pagina, porque quebra-lo prejudicaria o SEO do proprio ML.
+   *   1. <meta itemprop="price" content="319.90">
+   *   2. <script type="application/ld+json"> com "offers": o preco
    *
-   * 2. A classe do componente de preco. Funciona, mas e o tipo de coisa que
-   *    morre num redesenho - por isso fica so como plano B.
+   * O preco do componente visual (".andes-money-amount") NAO e mais usado.
+   * Na tela ele aparece varias vezes - riscado, parcela, "a partir de" - e
+   * qualquer heuristica para escolher um pode pegar o errado. Como o preco
+   * so serve para a RECEITA ESTIMADA, e melhor ela ficar em branco do que
+   * mostrar uma conta feita com o preco errado.
    *
    * @returns {number|null} preco em reais
    */
@@ -94,33 +164,54 @@
       // Em dado estruturado o preco vem no padrao internacional
       // ("319.90", ponto decimal), entao parseFloat resolve direto.
       const valor = parseFloat(meta.getAttribute("content"));
-      if (!isNaN(valor)) return valor;
+      if (valor > 0) return valor;
     }
 
-    // Plano B: o componente de preco. O "primeiro da pagina" costuma ser o
-    // RISCADO (antes do desconto) ou a parcela - por isso filtramos: pulamos
-    // os elementos com texto tachado (line-through) e pegamos o primeiro
-    // que sobra. E uma heuristica e pode seguir errada, mas deixa de
-    // exagerar a receita por ordem de grandeza.
-    const fracoes = document.querySelectorAll(".andes-money-amount__fraction");
+    const blocos = document.querySelectorAll('script[type="application/ld+json"]');
 
-    for (let i = 0; i < fracoes.length; i++) {
-      const fracao = fracoes[i];
+    for (let i = 0; i < blocos.length; i++) {
+      const valor = precoDoJsonLd(blocos[i].textContent);
+      if (valor !== null) return valor;
+    }
 
-      // parentElement e o andes-money-amount que carrega o estilo riscado.
-      const estilo = fracao.parentElement
-        ? getComputedStyle(fracao.parentElement)
-        : null;
+    return null;
+  }
 
-      if (estilo && estilo.textDecorationLine.indexOf("line-through") !== -1) {
+  /**
+   * Procura o preco das ofertas num bloco JSON-LD - que pode ser um objeto,
+   * uma lista ou trazer um "@graph" dentro.
+   *
+   * @param {string} texto conteudo do script application/ld+json
+   * @returns {number|null}
+   */
+  function precoDoJsonLd(texto) {
+    let dado;
+
+    try {
+      dado = JSON.parse(texto);
+    } catch (e) {
+      return null;  // bloco malformado: ignora, nao quebra o painel
+    }
+
+    const fila = [dado];
+
+    while (fila.length > 0) {
+      const item = fila.shift();
+      if (!item || typeof item !== "object") continue;
+
+      if (Array.isArray(item)) {
+        fila.push.apply(fila, item);
         continue;
       }
 
-      // Aqui o texto esta no formato brasileiro ("1.234"), entao o ponto
-      // e separador de milhar e precisa sumir antes de converter.
-      const limpo = fracao.textContent.split(".").join("").trim();
-      const valor = parseInt(limpo, 10);
-      if (!isNaN(valor)) return valor;
+      const ofertas = [].concat(item.offers || []);
+
+      for (let i = 0; i < ofertas.length; i++) {
+        const valor = parseFloat(ofertas[i] && ofertas[i].price);
+        if (valor > 0) return valor;
+      }
+
+      if (item["@graph"]) fila.push(item["@graph"]);
     }
 
     return null;
@@ -139,6 +230,17 @@
       style: "currency",
       currency: "BRL"
     });
+  }
+
+  /**
+   * Formata percentual como no Brasil e no ML: "13,9%", com virgula.
+   * toFixed dava "13.9%", que a pessoa le diferente do que o site mostra.
+   */
+  function formatarPercentual(valor) {
+    return valor.toLocaleString("pt-BR", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1
+    }) + "%";
   }
 
   /**
@@ -167,9 +269,26 @@
     return "atualizado há " + dias + " dias";
   }
 
-  function diasDesde(timestamp) {
+  /**
+   * Quantos dias de CALENDARIO separam a data da captura de hoje.
+   *
+   * Contar blocos de 24 horas dizia "atualizado hoje" para uma leitura feita
+   * ontem a noite. Comparamos a meia-noite de cada data; o Math.round absorve
+   * a hora a mais ou a menos dos dias de horario de verao.
+   *
+   * @param {number} timestamp
+   * @param {number} [agora] so para teste; o padrao e Date.now()
+   * @returns {number}
+   */
+  function diasDesde(timestamp, agora) {
     const MS_POR_DIA = 24 * 60 * 60 * 1000;
-    return Math.floor((Date.now() - timestamp) / MS_POR_DIA);
+    const hoje = new Date(agora === undefined ? Date.now() : agora);
+    const dia = new Date(timestamp);
+
+    hoje.setHours(0, 0, 0, 0);
+    dia.setHours(0, 0, 0, 0);
+
+    return Math.round((hoje - dia) / MS_POR_DIA);
   }
 
   // --------------------------------------------------------------------------
@@ -253,6 +372,26 @@
   }
 
   /**
+   * Escolhe, entre os codigos candidatos da pagina, o primeiro que tem numero
+   * provado no cache.
+   *
+   * @param {string[]} codigos candidatos, na ordem de confianca
+   * @param {Object} cache mlmetrics_dados
+   * @returns {Object|null} codigo e provado (ver somenteComOrigem) - ou null
+   */
+  function escolherRegistro(codigos, cache) {
+    for (let i = 0; i < codigos.length; i++) {
+      const provado = somenteComOrigem(cache[codigos[i]]);
+
+      if (provado.visitas !== undefined || provado.vendas !== undefined) {
+        return { codigo: codigos[i], provado: provado };
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Texto do "de onde veio" de um numero lido, para o title da linha.
    *
    * @param {Object|undefined} origem trecho, tela, em e automatica
@@ -324,7 +463,7 @@
     botao.addEventListener("click", function () {
       // Anotar antes de remover: uma gravacao no cache que chegue entre os
       // dois passos ja encontra o anuncio marcado como fechado.
-      fechadoPara = extrairCodigoAnuncio();
+      fechadoPara = chaveDaPagina();
       painel.remove();
     });
     return botao;
@@ -377,7 +516,7 @@
     // ninguem confundir estimativa com dado do Mercado Livre.
     linhas.push(criarLinha(
       "Conversão",
-      metricas.conversao !== null ? metricas.conversao.toFixed(1) + "%" : null,
+      metricas.conversao !== null ? formatarPercentual(metricas.conversao) : null,
       metricas.conversao !== null ? "Calculado: vendas ÷ visitas × 100." : null
     ));
 
@@ -387,14 +526,24 @@
       metricas.visitasPorVenda !== null ? "Calculado: visitas ÷ vendas, arredondado." : null
     ));
 
+    let explicacaoReceita = null;
+
+    if (metricas.receita !== null) {
+      explicacaoReceita = "Estimativa: vendas × preço atual desta página (" +
+        formatarReais(preco) + "). Não é o faturamento real: não considera " +
+        "promoções, variações nem mudanças de preço.";
+    } else if (metricas.vendas && !preco) {
+      // Sem preco confiavel a conta nao e feita - e o traco precisa dizer
+      // por que, senao parece defeito.
+      explicacaoReceita = "Sem estimativa: esta página não informa o preço " +
+        "nos dados estruturados, e o preço visível pode ser parcela ou " +
+        "valor riscado.";
+    }
+
     linhas.push(criarLinha(
       "Receita estimada",
       metricas.receita !== null ? formatarReais(metricas.receita) : null,
-      metricas.receita !== null
-        ? "Estimativa: vendas × preço atual desta página (" + formatarReais(preco) +
-          "). Não é o faturamento real: não considera promoções, variações " +
-          "nem mudanças de preço."
-        : null
+      explicacaoReceita
     ));
 
     linhas.forEach(function (linha) {
@@ -466,23 +615,22 @@
    * preciso - cada chamada substitui o painel anterior.
    */
   function atualizar() {
-    // Guardamos o codigo no momento da chamada. A leitura do storage e
-    // assincrona, e navegar rapido entre anuncios pode fazer o callback
-    // voltar depois que a URL ja mudou de novo (condicao de corrida). Sem
-    // esta conferencia, o painel do anuncio A desenharia sobre a pagina de
-    // B. Se a URL mudou, a proximima chamada deste poller resolve.
-    const codigoNoInicio = extrairCodigoAnuncio();
+    // Guardamos a chave da pagina no momento da chamada. A leitura do
+    // storage e assincrona, e navegar rapido entre anuncios pode fazer o
+    // callback voltar depois que a URL ja mudou de novo (condicao de
+    // corrida). Sem esta conferencia, o painel do anuncio A desenharia sobre
+    // a pagina de B. Se a URL mudou, a proxima chamada do poller resolve.
+    const chaveNoInicio = chaveDaPagina();
 
     // Saiu de uma pagina de anuncio (foi para a home, busca, carrinho).
     // Tiramos o painel: melhor nada do que numeros de outro produto.
-    if (!codigoNoInicio) {
-      const anterior = document.getElementById(PREFIXO + "-painel");
-      if (anterior) anterior.remove();
+    if (!chaveNoInicio) {
+      removerPainel();
       return;
     }
 
-    // A pessoa fechou o painel deste anuncio: respeitamos (ver fechadoPara).
-    if (codigoNoInicio === fechadoPara) return;
+    // A pessoa fechou o painel desta pagina: respeitamos (ver fechadoPara).
+    if (chaveNoInicio === fechadoPara) return;
 
     // chrome.storage e assincrono: devolve por callback, nao por retorno.
     // Toda a montagem do painel acontece dentro dele, ja com o dado em maos.
@@ -492,22 +640,21 @@
 
         // A pagina mudou enquanto o storage respondia, ou a pessoa fechou o
         // painel nesse meio tempo: nada a fazer aqui.
-        if (extrairCodigoAnuncio() !== codigoNoInicio) return;
-        if (codigoNoInicio === fechadoPara) return;
+        if (chaveDaPagina() !== chaveNoInicio) return;
+        if (chaveNoInicio === fechadoPara) return;
 
         const cache = guardado[CHAVE_CACHE] || {};
 
-        // So entra no painel numero COM rastro de origem (somenteComOrigem).
-        // Registro de versao antiga, sem rastro, conta como "sem dado".
-        const provado = somenteComOrigem(cache[codigoNoInicio]);
-        const temProva = provado.visitas !== undefined || provado.vendas !== undefined;
+        // O primeiro candidato da pagina (ver codigosDaPagina) com numero COM
+        // rastro de origem. Registro de versao antiga, sem rastro, conta como
+        // "sem dado" (ver somenteComOrigem).
+        const escolha = escolherRegistro(chaveNoInicio.split("|"), cache);
 
-        if (!temProva) {
-          // Sem dado conferivel deste anuncio. Um painel com numeros que ainda esteja na
-          // tela sai - e o que acontece logo depois de "Limpar dados
-          // guardados", quando o cache inteiro some.
-          const anterior = document.getElementById(PREFIXO + "-painel");
-          if (anterior) anterior.remove();
+        if (!escolha) {
+          // Sem dado conferivel deste anuncio. Um painel com numeros que
+          // ainda esteja na tela sai - e o que acontece logo depois de
+          // "Limpar dados guardados", quando o cache inteiro some.
+          removerPainel();
 
           // So mostramos o painel vazio quando HA outros anuncios capturados.
           // Se o cache esta vazio, a pessoa provavelmente esta navegando como
@@ -515,6 +662,8 @@
           if (Object.keys(cache).length > 0) montarPainelVazio();
           return;
         }
+
+        const provado = escolha.provado;
 
         // A idade exibida e a da leitura MAIS ANTIGA entre os numeros do
         // painel. Se as visitas foram lidas hoje e as vendas ha 10 dias, o
@@ -524,15 +673,14 @@
           .filter(Boolean);
         const idade = datas.length > 0
           ? Math.min.apply(null, datas)
-          : cache[codigoNoInicio].capturadoEm;
+          : cache[escolha.codigo].capturadoEm;
 
         const preco = lerPreco();
         montarPainel(calcular(provado, preco), idade, provado.origem, preco);
       });
     } catch (e) {
       // contexto invalidado: o painel antigo sai, a proxima leitura tenta.
-      const anterior = document.getElementById(PREFIXO + "-painel");
-      if (anterior) anterior.remove();
+      removerPainel();
     }
   }
 
@@ -586,15 +734,19 @@
       // outro anuncio, ou so a renovacao periodica da data. Remontar o painel
       // a cada uma fazia ele piscar - e voltar depois de fechado. So reagimos
       // quando o registro DO ANUNCIO DA TELA mudou de verdade.
-      const codigo = extrairCodigoAnuncio();
-      if (!codigo) return;
+      const chave = chaveDaPagina();
+      if (!chave) return;
 
-      const antes = (mudancas[CHAVE_CACHE].oldValue || {})[codigo];
-      const depois = (mudancas[CHAVE_CACHE].newValue || {})[codigo];
+      const antes = mudancas[CHAVE_CACHE].oldValue || {};
+      const depois = mudancas[CHAVE_CACHE].newValue || {};
 
       // JSON.stringify compara o conteudo: objetos lidos do storage nunca sao
-      // o mesmo objeto, entao === diria sempre "diferente".
-      if (JSON.stringify(antes) === JSON.stringify(depois)) return;
+      // o mesmo objeto, entao === diria sempre "diferente". Olhamos TODOS os
+      // candidatos da pagina - o dado pode ter chegado para qualquer um deles.
+      const mudouAlgum = chave.split("|").some(function (codigo) {
+        return JSON.stringify(antes[codigo]) !== JSON.stringify(depois[codigo]);
+      });
+      if (!mudouAlgum) return;
 
       atualizar();
     });

@@ -124,7 +124,8 @@ texto:
    depois Ctrl+C.
 
 O relatório lê a tela que está aberta **no momento do clique** e mostra o que
-a extensão enxergou nela. Também traz quais telas de vendedor ela já
+a extensão enxergou nela. Quando algum número não aparece (por exemplo, as
+vendas), o relatório diz o motivo. Também traz quais telas de vendedor ela já
 reconheceu e os números guardados. Os endereços vão sem números e sem nome de
 produto. É a forma mais rápida de eu ver o que está acontecendo no seu
 navegador.
