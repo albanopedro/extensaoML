@@ -125,13 +125,42 @@
    * @returns {number|null}
    */
   function numeroAntesDe(texto, palavra) {
+    // A leitura mora em lerRotulo, que tambem diz ONDE o numero estava no
+    // texto (para o rastro de origem). Aqui fica so o numero.
+    const leitura = lerRotulo(texto, palavra);
+    return leitura ? leitura.valor : null;
+  }
+
+  /**
+   * Faz a leitura descrita em numeroAntesDe e devolve tambem a POSICAO dela
+   * no texto: de onde ate onde vai o pedaco "numero + rotulo" que virou dado.
+   *
+   * A posicao existe para o rastro de origem (ver trechoDaLeitura). Cada
+   * numero guardado leva junto o texto exato de onde saiu, e e isso que
+   * permite conferir o painel contra a tela do Mercado Livre.
+   *
+   * @param {string} texto
+   * @param {string} palavra rotulo procurado, em minusculo
+   * @returns {Object|null} valor, inicio e fim da leitura - ou null
+   */
+  function lerRotulo(texto, palavra) {
     if (!texto) return null;
 
     const posicao = texto.toLowerCase().lastIndexOf(palavra);
     if (posicao === -1) return null;
 
+    // Fim do rotulo INTEIRO: o rotulo procurado e "visita", mas o texto diz
+    // "visitas". As letras que sobram fazem parte da palavra - nao podem ser
+    // lidas como palavra estranha antes do numero, e o rastro deve mostrar
+    // "visitas" inteiro.
+    const sobraDaPalavra = texto
+      .slice(posicao + palavra.length)
+      .match(/^[a-zA-Z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF]*/)[0];
+    const fimDoRotulo = posicao + palavra.length + sobraDaPalavra.length;
+
     // Primeiro tentamos antes do rotulo, que e a ordem natural em portugues.
-    const antes = ultimoNumeroColado(texto.slice(0, posicao));
+    const trechoAntes = texto.slice(0, posicao);
+    const antes = ultimoNumeroColado(trechoAntes);
 
     if (antes !== null) {
       // Um ANO solto nao e metrica: "Ativo desde 2024 vendas" nao tem valor
@@ -140,20 +169,80 @@
       // numero - e ela que denuncia o contexto de tempo. Sem o "desde",
       // "2024 vendas" pode ser metrica legitima (ele vendeu 2024 vezes) e
       // nao pode ser bloqueado pelo tamanho do numero.
-      if (ehAnoPosDesde(texto.slice(0, posicao), antes)) return null;
-      return antes;
+      if (ehAnoPosDesde(trechoAntes, antes)) return null;
+
+      // O numero colado ANTES pode ser de OUTRO rotulo. Em "Visitas: 359 |
+      // Vendas: 12", o 359 esta logo antes de "Vendas", mas pertence a
+      // "Visitas". Quando um rotulo conhecido vem antes do numero, ele e o
+      // dono - e a leitura segue para depois do rotulo, onde esta o 12.
+      if (!numeroPresoAOutroRotulo(trechoAntes)) {
+        const numeros = Array.from(trechoAntes.matchAll(/\d[\d.,]*/g));
+        return {
+          valor: antes,
+          inicio: numeros[numeros.length - 1].index,
+          fim: fimDoRotulo
+        };
+      }
     }
 
-    // Se nao achou, tentamos depois - cobre "Visitas: 359".
-    //
-    // Antes disso removemos as letras que sobraram da propria palavra: o
-    // rotulo procurado e "visita", mas o texto diz "visitas", entao o "s"
-    // ficaria no caminho e seria lido como palavra estranha.
-    const depois = texto
-      .slice(posicao + palavra.length)
-      .replace(/^[a-zA-Z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF]+/, "");
+    // Se nao achou (ou o numero de antes tinha outro dono), tentamos depois
+    // do rotulo - cobre "Visitas: 359".
+    const depois = texto.slice(fimDoRotulo);
+    const valorDepois = primeiroNumeroColado(depois);
+    if (valorDepois === null) return null;
 
-    return primeiroNumeroColado(depois);
+    const achado = depois.match(/\d[\d.,]*/);
+    return {
+      valor: valorDepois,
+      inicio: posicao,
+      fim: fimDoRotulo + achado.index + achado[0].length
+    };
+  }
+
+  /**
+   * Diz se o ultimo numero de um trecho pertence a um rotulo que vem ANTES
+   * dele - e portanto nao pode ser atribuido ao rotulo que vem depois.
+   *
+   *   "Visitas: 359 | "      -> 359 e de "Visitas"       preso
+   *   "Estoque 12 - "        -> 12 e do estoque           preso
+   *   "Kit 2 caixas 359 "    -> nenhum rotulo conhecido   livre
+   *
+   * Olhamos o pedaco entre o numero anterior (ou o comeco) e este numero,
+   * limitado aos 40 caracteres mais proximos: prosa distante nao conta.
+   *
+   * O custo e conhecido e aceito. Num texto corrido como "359 visitas 12
+   * vendas", o 12 fica entre dois rotulos e nao da para saber de quem ele e -
+   * entao as vendas ficam sem leitura. Na duvida, nao mostramos: numero que
+   * falta aparece como um traco no painel; numero trocado nao apareceria
+   * como nada, pareceria certo.
+   *
+   * @param {string} trecho texto antes do rotulo, terminando no numero
+   * @returns {boolean}
+   */
+  function numeroPresoAOutroRotulo(trecho) {
+    const numeros = Array.from(trecho.matchAll(/\d[\d.,]*/g));
+    if (numeros.length === 0) return false;
+
+    const ultimo = numeros[numeros.length - 1];
+    const anterior = numeros.length > 1 ? numeros[numeros.length - 2] : null;
+    const comeco = anterior ? anterior.index + anterior[0].length : 0;
+
+    const pedaco = trecho
+      .slice(Math.max(comeco, ultimo.index - 40), ultimo.index)
+      .toLowerCase();
+
+    // Os rotulos das metricas, mais os de quantidade que aparecem ao lado
+    // delas nas telas de vendedor. Lista fechada: so rotulo que sabemos que
+    // e dono de numero.
+    const donos = [].concat(
+      ROTULOS.visitas,
+      ROTULOS.vendas,
+      ["estoque", "quantidade", "unidade", "dispon"]
+    );
+
+    return donos.some(function (dono) {
+      return pedaco.indexOf(dono) !== -1;
+    });
   }
 
   /**
@@ -426,7 +515,7 @@
    *
    * @param {Element} elemento
    * @param {string} palavra
-   * @returns {number|null}
+   * @returns {Object|null} valor e trecho - o numero e o rastro dele
    */
   function valorDoRotulo(elemento, palavra, limite, doc) {
     let atual = elemento;
@@ -441,8 +530,14 @@
       // numero em regiao nao relacionada. Antes de ler, recuamos um nivel
       // quando o atual e o body.
       if (atual !== doc.body) {
-        const valor = numeroAntesDe(atual.textContent, palavra);
-        if (valor !== null) return valor;
+        const texto = atual.textContent;
+        const leitura = lerRotulo(texto, palavra);
+
+        // Devolvemos o numero junto com o RASTRO: o pedaco de texto exato
+        // em que ele foi lido, neste nivel do DOM.
+        if (leitura !== null) {
+          return { valor: leitura.valor, trecho: trechoDaLeitura(texto, leitura) };
+        }
       }
 
       // Chegamos na fronteira do anuncio: daqui para cima ja e territorio
@@ -453,6 +548,37 @@
     }
 
     return null;
+  }
+
+  /**
+   * Monta o RASTRO de uma leitura: o texto exato que virou numero, marcado
+   * entre as aspas angulares (« e »), com um pouco de contexto dos
+   * dois lados. Exemplo, com colchetes no lugar das aspas:
+   *
+   *   "Estoque 12 - [359 visitas] totais"
+   *
+   * O contexto e o que permite a qualquer pessoa conferir o numero contra a
+   * tela do Mercado Livre - e perceber quando ele foi colado no rotulo
+   * errado. E curto de proposito (20 caracteres de cada lado): janela maior
+   * arrastaria titulo de anuncio e preco para dentro do cache.
+   *
+   * @param {string} texto o texto em que a leitura foi feita
+   * @param {Object} leitura valor, inicio e fim, vindos de lerRotulo
+   * @returns {string}
+   */
+  function trechoDaLeitura(texto, leitura) {
+    const CONTEXTO = 20;
+
+    // Espacos e quebras de linha da indentacao do HTML viram um espaco so.
+    function compactar(pedaco) {
+      return pedaco.replace(/\s+/g, " ");
+    }
+
+    const antes = compactar(texto.slice(Math.max(0, leitura.inicio - CONTEXTO), leitura.inicio));
+    const lido = compactar(texto.slice(leitura.inicio, leitura.fim)).trim();
+    const depois = compactar(texto.slice(leitura.fim, leitura.fim + CONTEXTO));
+
+    return (antes + "«" + lido + "»" + depois).trim();
   }
 
   // --------------------------------------------------------------------------
@@ -553,6 +679,10 @@
 
     const resultado = {};
 
+    // Em qual tela a leitura acontece, para o rastro de origem. Mascarado
+    // (ver caminhoMascarado): diz a FORMA da rota, sem codigo nem titulo.
+    const tela = caminhoMascarado(new URL(url).pathname);
+
     const caminhante = doc.createTreeWalker(
       doc.body,
       NodeFilter.SHOW_TEXT,  // so nos de texto, ignora tags e comentarios
@@ -602,19 +732,26 @@
                 // indexOf(...) !== -1 significa "contem".
                 if (texto.indexOf(palavra) === -1) return;
 
-                const valor = valorDoRotulo(elemento, palavra, contexto.limite, doc);
+                const leitura = valorDoRotulo(elemento, palavra, contexto.limite, doc);
 
                 // So guardamos com as duas pontas: de qual anuncio, e quanto.
-                if (valor === null) return;
+                if (leitura === null) return;
 
-                if (!resultado[codigo]) resultado[codigo] = {};
+                if (!resultado[codigo]) resultado[codigo] = { origem: {} };
 
                 // Ficamos com o MAIOR valor encontrado na pagina para cada
                 // metrica. Telas costumam mostrar recortes lado a lado
                 // ("visitas hoje" e "visitas totais") e o total e o que interessa.
                 const atual = resultado[codigo][metrica];
-                if (atual === undefined || valor > atual) {
-                  resultado[codigo][metrica] = valor;
+                if (atual === undefined || leitura.valor > atual) {
+                  resultado[codigo][metrica] = leitura.valor;
+
+                  // O rastro acompanha o numero que venceu: e a prova de onde
+                  // ELE saiu, nao de uma leitura que foi descartada.
+                  resultado[codigo].origem[metrica] = {
+                    trecho: leitura.trecho,
+                    tela: tela
+                  };
                 }
               });
             });
@@ -632,12 +769,21 @@
     // gerou esta regra tinha 137 anuncios "de dezenas de vendedores" e ZERO
     // visitas: todos vieram de paginas publicas. Visitas e a metrica que a
     // pagina publica nunca exibe, entao sem visita lida nao ha captura.
-    const leuVisitas = Object.keys(resultado).some(function (codigo) {
-      return resultado[codigo].visitas !== undefined;
-    });
-    if (!leuVisitas) return {};
+    //
+    // E a regra vale POR ANUNCIO, nao pela pagina inteira. Antes bastava UM
+    // card ter visitas para qualquer outro codigo, so com vendas, passar - e
+    // um modulo de terceiros dentro da tela de vendedor ("mais vendidos",
+    // recomendados) gravaria "+1.000 vendidos" num produto alheio. Codigo sem
+    // visita lida nesta varredura fica de fora inteiro: na duvida, nao grava.
+    const comVisitas = {};
 
-    return descartarImplausiveis(resultado);
+    Object.keys(resultado).forEach(function (codigo) {
+      if (resultado[codigo].visitas !== undefined) {
+        comVisitas[codigo] = resultado[codigo];
+      }
+    });
+
+    return descartarImplausiveis(comVisitas);
   }
 
   /**
@@ -702,9 +848,59 @@
     // Nunca vimos este anuncio: e novidade por definicao.
     if (!antigo) return true;
 
-    return Object.keys(novo).some(function (metrica) {
+    // So as METRICAS contam. O rastro de origem muda a cada leitura (hora,
+    // tela) mesmo com o numero igual; compara-lo faria tudo parecer
+    // diferente, e o aviso verde dispararia sem parar.
+    return Object.keys(ROTULOS).some(function (metrica) {
+      // Metrica que esta tela nao mostrou nao conta como mudanca.
+      if (novo[metrica] === undefined) return false;
       return antigo[metrica] !== novo[metrica];
     });
+  }
+
+  /**
+   * Diz se o registro guardado tem numero SEM rastro de origem para alguma
+   * metrica que acabou de ser lida de novo.
+   *
+   * Acontece com registro gravado por versao antiga da extensao. Numero sem
+   * rastro nao aparece no painel, entao a primeira releitura precisa gravar o
+   * rastro na hora, sem esperar o intervalo de renovacao.
+   *
+   * @param {Object} guardado registro do cache
+   * @param {Object} novo o que esta varredura leu para o mesmo anuncio
+   * @returns {boolean}
+   */
+  function faltaOrigem(guardado, novo) {
+    return Object.keys(ROTULOS).some(function (metrica) {
+      return novo[metrica] !== undefined &&
+             !(guardado.origem && guardado.origem[metrica]);
+    });
+  }
+
+  /**
+   * Junta o rastro de origem guardado com o desta leitura, metrica a metrica,
+   * carimbando a hora e se a leitura veio da busca automatica.
+   *
+   * Por metrica, igual aos numeros: a origem das vendas lidas em outra tela
+   * nao pode sumir so porque esta tela trouxe as visitas.
+   *
+   * @param {Object|undefined} guardada origem que ja estava no cache
+   * @param {Object|undefined} nova origem desta varredura (varrerPagina)
+   * @param {number} agora
+   * @param {boolean} automatica true quando veio da busca em segundo plano
+   * @returns {Object}
+   */
+  function mesclarOrigem(guardada, nova, agora, automatica) {
+    const resultado = Object.assign({}, guardada);
+
+    Object.keys(nova || {}).forEach(function (metrica) {
+      resultado[metrica] = Object.assign({}, nova[metrica], {
+        em: agora,
+        automatica: Boolean(automatica)
+      });
+    });
+
+    return resultado;
   }
 
   // Fila que serializa leitura+escrita do cache DESTA aba.
@@ -814,6 +1010,12 @@
         if (mudancas.indexOf(codigo) !== -1) return false;
         const anterior = cache[codigo];
         if (!anterior) return false; // sem registro, foi para mudancas
+
+        // Registro de versao antiga, sem rastro de origem: renova na hora.
+        // Numero sem rastro nao aparece no painel, entao esperar o intervalo
+        // deixaria um numero confirmado agora escondido por ate 2 minutos.
+        if (faltaOrigem(anterior, novos[codigo])) return true;
+
         return AGORA - (anterior.capturadoEm || 0) >= INTERVALO_RENOVACAO_MS;
       });
 
@@ -834,16 +1036,25 @@
         // velha e a nova vence a NOVA, nao a maior: dentro de uma mesma
         // pagina o maior valor e o total, mas entre dias diferentes o
         // numero recente e o correto, mesmo que seja menor.
-        cache[codigo] = Object.assign({}, cache[codigo], novos[codigo], {
+        const anterior = cache[codigo] || {};
+
+        cache[codigo] = Object.assign({}, anterior, novos[codigo], {
           // Data da captura. Permite exibir "dado de 3 dias atras"
           // em vez de mostrar numero velho como se fosse de agora.
-          capturadoEm: AGORA
+          capturadoEm: AGORA,
+          // O rastro e mesclado por metrica (ver mesclarOrigem), e nao
+          // substituido inteiro como faria o Object.assign acima.
+          origem: mesclarOrigem(anterior.origem, novos[codigo].origem, AGORA, emSegundoPlano)
         });
       });
 
-      // So a data anda; os numeros continuam os mesmos.
+      // Os numeros continuam os mesmos; andam a data e o rastro, que passa a
+      // apontar para a leitura mais recente que confirmou cada numero.
       aRenovar.forEach(function (codigo) {
         cache[codigo].capturadoEm = AGORA;
+        cache[codigo].origem = mesclarOrigem(
+          cache[codigo].origem, novos[codigo].origem, AGORA, emSegundoPlano
+        );
       });
 
       gravar(cache);

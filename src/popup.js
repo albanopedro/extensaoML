@@ -47,6 +47,9 @@
     const item = document.createElement("div");
     item.className = "item";
 
+    const linha = document.createElement("div");
+    linha.className = "linha";
+
     const esquerda = document.createElement("span");
     esquerda.className = "codigo";
     esquerda.textContent = codigo;
@@ -54,17 +57,61 @@
     const direita = document.createElement("span");
     direita.className = "numeros";
 
-    // Montamos so o que existe. Escrever "0 visitas" quando nao sabemos
-    // quantas foram seria afirmar algo falso.
+    linha.appendChild(esquerda);
+    linha.appendChild(direita);
+    item.appendChild(linha);
+
+    // Montamos so o que existe E tem rastro de origem. Escrever "0 visitas"
+    // quando nao sabemos quantas foram seria afirmar algo falso - e mostrar
+    // um numero sem dizer de onde ele saiu tambem. Embaixo de cada numero vai
+    // o texto exato em que ele foi lido (entre as aspas angulares), a tela e
+    // a hora: e isso que a pessoa compara com o que o Mercado Livre mostra.
+    const origem = dados.origem || {};
     const partes = [];
-    if (dados.visitas !== undefined) partes.push(dados.visitas + " visitas");
-    if (dados.vendas !== undefined) partes.push(dados.vendas + " vendas");
+    let semOrigem = false;
 
-    direita.textContent = partes.join(" · ") || "sem dados";
+    ["visitas", "vendas"].forEach(function (metrica) {
+      if (dados[metrica] === undefined) return;
 
-    item.appendChild(esquerda);
-    item.appendChild(direita);
+      if (!origem[metrica]) {
+        semOrigem = true;
+        return;
+      }
+
+      // No formato do ML ("1.234"), para bater com o que a pessoa ve na tela
+      // e com o trecho logo abaixo.
+      partes.push(Number(dados[metrica]).toLocaleString("pt-BR") + " " + metrica);
+
+      const rastro = document.createElement("div");
+      rastro.className = "origem";
+      rastro.textContent = metrica + ": " + origem[metrica].trecho +
+        " · " + (origem[metrica].tela || "?") +
+        " · " + formatarData(origem[metrica].em) +
+        (origem[metrica].automatica ? " (automática)" : "");
+      item.appendChild(rastro);
+    });
+
+    direita.textContent = partes.join(" · ") ||
+      (semOrigem ? "sem origem (versão antiga)" : "sem dados");
+
     return item;
+  }
+
+  /**
+   * Data curta para o rastro: "14/09, 14:02".
+   *
+   * @param {number|undefined} timestamp
+   * @returns {string}
+   */
+  function formatarData(timestamp) {
+    if (!timestamp) return "?";
+
+    return new Date(timestamp).toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
   }
 
   /**
@@ -87,7 +134,19 @@
           return;
         }
 
-        resumo.textContent = codigos.length + " anúncio(s) com dados guardados.";
+        // Registro sem nenhum rastro de origem veio de versao antiga: nao pode
+        // ser conferido e nao aparece no painel. Contamos a parte para a pessoa
+        // saber que "Limpar dados guardados" resolve.
+        const semOrigem = codigos.filter(function (codigo) {
+          const origem = cache[codigo].origem || {};
+          return !origem.visitas && !origem.vendas;
+        }).length;
+
+        resumo.textContent = codigos.length + " anúncio(s) com dados guardados." +
+          (semOrigem > 0
+            ? " " + semOrigem + " sem origem (de versão antiga): use " +
+              "\"Limpar dados guardados\"."
+            : "");
 
         codigos.forEach(function (codigo) {
           lista.appendChild(criarItem(codigo, cache[codigo]));

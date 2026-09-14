@@ -225,6 +225,51 @@
     };
   }
 
+  /**
+   * Fica so com os numeros que tem RASTRO DE ORIGEM.
+   *
+   * Cada numero que o coletor grava leva junto o texto exato de onde foi lido,
+   * a tela e a hora (ver trechoDaLeitura no coletor.js). Numero sem esse
+   * rastro - gravado por uma versao antiga da extensao - nao tem como ser
+   * conferido, e numero que nao pode ser conferido nao entra no painel.
+   *
+   * @param {Object|undefined} dados registro do cache
+   * @returns {Object} visitas e vendas so quando provadas, mais a origem delas
+   */
+  function somenteComOrigem(dados) {
+    const provado = { origem: {} };
+    if (!dados) return provado;
+
+    const origem = dados.origem || {};
+
+    ["visitas", "vendas"].forEach(function (metrica) {
+      if (dados[metrica] !== undefined && origem[metrica]) {
+        provado[metrica] = dados[metrica];
+        provado.origem[metrica] = origem[metrica];
+      }
+    });
+
+    return provado;
+  }
+
+  /**
+   * Texto do "de onde veio" de um numero lido, para o title da linha.
+   *
+   * @param {Object|undefined} origem trecho, tela, em e automatica
+   * @returns {string|null}
+   */
+  function explicarOrigem(origem) {
+    if (!origem) return null;
+
+    const quando = origem.em
+      ? new Date(origem.em).toLocaleString("pt-BR")
+      : "data desconhecida";
+
+    return "Lido na tela " + (origem.tela || "?") +
+      (origem.automatica ? " (busca automática)" : "") +
+      ", em " + quando + ":\n" + origem.trecho;
+  }
+
   // --------------------------------------------------------------------------
   // Exibicao
   // --------------------------------------------------------------------------
@@ -237,9 +282,13 @@
    * seria interpretado como HTML e executado - textContent trata tudo
    * como texto puro, que e o que queremos.
    */
-  function criarLinha(rotulo, valor) {
+  function criarLinha(rotulo, valor, explicacao) {
     const linha = document.createElement("div");
     linha.className = PREFIXO + "-linha";
+
+    // Passar o mouse sobre a linha mostra DE ONDE o numero veio, ou como ele
+    // foi calculado. E o que permite conferir o painel contra a tela do ML.
+    if (explicacao) linha.title = explicacao;
 
     const textoRotulo = document.createElement("span");
     textoRotulo.className = PREFIXO + "-rotulo";
@@ -283,8 +332,13 @@
 
   /**
    * Monta e insere o painel na pagina.
+   *
+   * @param {Object} metricas resultado de calcular
+   * @param {number} capturadoEm idade a exibir no rodape
+   * @param {Object} origem rastro de cada numero lido (somenteComOrigem)
+   * @param {number|null} preco preco lido da pagina, para explicar a receita
    */
-  function montarPainel(metricas, capturadoEm) {
+  function montarPainel(metricas, capturadoEm, origem, preco) {
     // O ML e uma SPA: navegar entre produtos nao recarrega a pagina, entao
     // este script pode rodar de novo. Removemos o painel anterior em vez de
     // so desistir, senao ficariamos exibindo os dados do produto antigo.
@@ -304,29 +358,43 @@
     // solta de divisor fica fazendo par entre a ultima metrica e o rodape.
     const linhas = [];
 
+    // "Visitas", e nao "Visitas totais": nada garante que a tela lida mostrava
+    // o total, e nao o recorte de um periodo (7, 30 dias). O rastro no title
+    // mostra o texto exato - la da para ver se era total ou recorte.
     linhas.push(criarLinha(
-      "Visitas totais",
-      metricas.visitas !== null ? metricas.visitas.toLocaleString("pt-BR") : null
+      "Visitas",
+      metricas.visitas !== null ? metricas.visitas.toLocaleString("pt-BR") : null,
+      explicarOrigem(origem.visitas)
     ));
 
     linhas.push(criarLinha(
       "Vendas",
-      metricas.vendas !== null ? metricas.vendas.toLocaleString("pt-BR") : null
+      metricas.vendas !== null ? metricas.vendas.toLocaleString("pt-BR") : null,
+      explicarOrigem(origem.vendas)
     ));
 
+    // As tres de baixo sao CALCULADAS, nao lidas. O title diz a conta, para
+    // ninguem confundir estimativa com dado do Mercado Livre.
     linhas.push(criarLinha(
       "Conversão",
-      metricas.conversao !== null ? metricas.conversao.toFixed(1) + "%" : null
+      metricas.conversao !== null ? metricas.conversao.toFixed(1) + "%" : null,
+      metricas.conversao !== null ? "Calculado: vendas ÷ visitas × 100." : null
     ));
 
     linhas.push(criarLinha(
       "Vende a cada",
-      metricas.visitasPorVenda !== null ? metricas.visitasPorVenda + " visitas" : null
+      metricas.visitasPorVenda !== null ? metricas.visitasPorVenda + " visitas" : null,
+      metricas.visitasPorVenda !== null ? "Calculado: visitas ÷ vendas, arredondado." : null
     ));
 
     linhas.push(criarLinha(
       "Receita estimada",
-      metricas.receita !== null ? formatarReais(metricas.receita) : null
+      metricas.receita !== null ? formatarReais(metricas.receita) : null,
+      metricas.receita !== null
+        ? "Estimativa: vendas × preço atual desta página (" + formatarReais(preco) +
+          "). Não é o faturamento real: não considera promoções, variações " +
+          "nem mudanças de preço."
+        : null
     ));
 
     linhas.forEach(function (linha) {
@@ -348,6 +416,12 @@
 
     rodape.textContent = descreverIdade(capturadoEm);
     painel.appendChild(rodape);
+
+    // Sem esta dica ninguem descobre que passar o mouse mostra a origem.
+    const dica = document.createElement("div");
+    dica.className = PREFIXO + "-dica";
+    dica.textContent = "Passe o mouse sobre um número para ver de onde ele veio.";
+    painel.appendChild(dica);
 
     document.body.appendChild(painel);
   }
@@ -422,10 +496,14 @@
         if (codigoNoInicio === fechadoPara) return;
 
         const cache = guardado[CHAVE_CACHE] || {};
-        const dados = cache[codigoNoInicio];
 
-        if (!dados) {
-          // Sem dado deste anuncio. Um painel com numeros que ainda esteja na
+        // So entra no painel numero COM rastro de origem (somenteComOrigem).
+        // Registro de versao antiga, sem rastro, conta como "sem dado".
+        const provado = somenteComOrigem(cache[codigoNoInicio]);
+        const temProva = provado.visitas !== undefined || provado.vendas !== undefined;
+
+        if (!temProva) {
+          // Sem dado conferivel deste anuncio. Um painel com numeros que ainda esteja na
           // tela sai - e o que acontece logo depois de "Limpar dados
           // guardados", quando o cache inteiro some.
           const anterior = document.getElementById(PREFIXO + "-painel");
@@ -438,7 +516,18 @@
           return;
         }
 
-        montarPainel(calcular(dados, lerPreco()), dados.capturadoEm);
+        // A idade exibida e a da leitura MAIS ANTIGA entre os numeros do
+        // painel. Se as visitas foram lidas hoje e as vendas ha 10 dias, o
+        // painel precisa dizer 10 dias - nao "hoje".
+        const datas = Object.keys(provado.origem)
+          .map(function (metrica) { return provado.origem[metrica].em; })
+          .filter(Boolean);
+        const idade = datas.length > 0
+          ? Math.min.apply(null, datas)
+          : cache[codigoNoInicio].capturadoEm;
+
+        const preco = lerPreco();
+        montarPainel(calcular(provado, preco), idade, provado.origem, preco);
       });
     } catch (e) {
       // contexto invalidado: o painel antigo sai, a proxima leitura tenta.

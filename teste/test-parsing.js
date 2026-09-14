@@ -14,6 +14,8 @@
 //   - o calculo do painel (calcular, guarda contra NaN e Infinity)
 //   - o texto oculto que nao pode virar metrica (#52: noscript, [hidden])
 //   - o que o diagnostico leva de endereco (caminhoMascarado)
+//   - numero preso a outro rotulo (#37) e visita exigida por anuncio (#48)
+//   - o rastro de origem de cada numero e o filtro do painel (so com rastro)
 //
 // Sem navegador de proposito: o que testamos aqui nao toca em DOM nem em
 // chrome.storage - sao funcoes puras, entao o resultado e deterministico.
@@ -126,6 +128,8 @@ function extrairConstValor(fonte, nome) {
 const blocoFuncoes = [
   "paraInteiro",
   "numeroAntesDe",
+  "lerRotulo",
+  "numeroPresoAOutroRotulo",
   "ultimoNumeroColado",
   "primeiroNumeroColado",
   "temLetra",
@@ -138,13 +142,20 @@ const blocoFuncoes = [
   "codigosDentroDe",
   "contextoDoAnuncio",
   "valorDoRotulo",
+  "trechoDaLeitura",
   "descartarImplausiveis",
   "varrerPagina",
-  "caminhoMascarado"
+  "caminhoMascarado",
+  "mudou",
+  "faltaOrigem",
+  "mesclarOrigem"
 ].map(function (nome) { return extrairFuncao(fonte, nome); }).join("\n");
 
 // O calculo do painel mora no content.js - tambem funcao pura.
-const blocoFuncaoContent = extrairFuncao(fonteContent, "calcular");
+const blocoFuncaoContent = [
+  extrairFuncao(fonteContent, "calcular"),
+  extrairFuncao(fonteContent, "somenteComOrigem")
+].join("\n");
 
 const blocoConstantes = [
   extrairConstObj(fonte, "ROTULOS"),
@@ -168,6 +179,9 @@ const codigoAvaliado = blocoConstantes + "\n" + blocoFuncoes + "\n" +
   "  ehAnoPosDesde: ehAnoPosDesde," +
   "  seguidoDeUnidade: seguidoDeUnidade," +
   "  caminhoMascarado: caminhoMascarado," +
+  "  mudou: mudou," +
+  "  faltaOrigem: faltaOrigem," +
+  "  mesclarOrigem: mesclarOrigem," +
   "  ehPaginaDeCompra: ehPaginaDeCompra," +
   "  aceitarNoDeTextoTecnico: aceitarNoDeTextoTecnico," +
   "  paginaMencionaVisita: paginaMencionaVisita," +
@@ -186,7 +200,7 @@ eval(codigoAvaliado);
 // O content.js tambem e IIFE; mesmo truque para o calcular.
 let exportadosContent;
 eval(blocoFuncaoContent + "\n" +
-  "exportadosContent = { calcular: calcular };");
+  "exportadosContent = { calcular: calcular, somenteComOrigem: somenteComOrigem };");
 
 const {
   numeroAntesDe,
@@ -194,6 +208,9 @@ const {
   ehData,
   seguidoDeUnidade,
   caminhoMascarado,
+  mudou,
+  faltaOrigem,
+  mesclarOrigem,
   ultimoNumeroColado,
   primeiroNumeroColado,
   ehPaginaDeCompra,
@@ -202,7 +219,7 @@ const {
   ROTULOS,
   PADRAO_CODIGO
 } = exportados;
-const { calcular } = exportadosContent;
+const { calcular, somenteComOrigem } = exportadosContent;
 
 // ----------------------------------------------------------------------------
 // Harness de teste
@@ -301,6 +318,21 @@ testar("'Vendas 12 de 40' - 'd' nao casa com 'de'", 12, numeroAntesDe("Vendas 12
 testar("'Visitas 359 minhas' - 'min' nao casa com 'minhas'", 359, numeroAntesDe("Visitas 359 minhas", "visita"));
 testar("seguidoDeUnidade(' dias')", true, seguidoDeUnidade(" dias"));
 testar("seguidoDeUnidade(' meses')", true, seguidoDeUnidade(" meses"));
+
+console.log("");
+console.log("=== #37 - numero preso a outro rotulo ===");
+// Layout "Rotulo: valor": o numero logo antes de "Vendas" e das visitas.
+testar("'Visitas: 359 | Vendas: 12' -> vendas 12", 12, numeroAntesDe("Visitas: 359 | Vendas: 12", "venda"));
+testar("'Visitas: 359 | Vendas: 12' -> visitas 359", 359, numeroAntesDe("Visitas: 359 | Vendas: 12", "visita"));
+testar("'Vendas: 12 Visitas: 359' -> visitas 359", 359, numeroAntesDe("Vendas: 12 Visitas: 359", "visita"));
+testar("'Visitas totais: 359 | Vendas: 12' -> vendas 12", 12, numeroAntesDe("Visitas totais: 359 | Vendas: 12", "venda"));
+testar("'Estoque: 12 | Vendas: 3' -> vendas 3", 3, numeroAntesDe("Estoque: 12 | Vendas: 3", "venda"));
+testar("'Estoque: 12 | Vendas' (sem numero de vendas) -> nada", null, numeroAntesDe("Estoque: 12 | Vendas", "venda"));
+// Custo aceito: texto corrido com numero entre dois rotulos fica sem leitura.
+testar("'359 visitas 12 vendas' -> vendas nada (ambiguo)", null, numeroAntesDe("359 visitas 12 vendas", "venda"));
+testar("'359 visitas 12 vendas' -> visitas 359", 359, numeroAntesDe("359 visitas 12 vendas", "visita"));
+// Palavra comum antes do numero nao e dona dele.
+testar("'Kit 2 caixas 359 visitas' -> 359", 359, numeroAntesDe("Kit 2 caixas 359 visitas", "visita"));
 
 console.log("");
 console.log("=== temLetra (#23) ===");
@@ -654,6 +686,77 @@ testar("rota de sistema fica igual", "/anuncios/lista", caminhoMascarado("/anunc
 testar("digitos viram #", "/vendas/#/detalhe", caminhoMascarado("/vendas/12345678/detalhe"));
 testar("titulo de produto some, tipo de codigo fica", "/(titulo)/up/MLBU#", caminhoMascarado("/kit-2-caixa-organizadora-modular/up/MLBU0000000001"));
 testar("rota de ate 3 palavras fica", "/publicaciones-y-ventas", caminhoMascarado("/publicaciones-y-ventas"));
+
+console.log("");
+console.log("=== #48 - visita exigida POR ANUNCIO ===");
+// Tela de vendedor com um modulo de terceiro que so mostra vendidos: o card
+// dela (com visitas) passa, o produto alheio (so vendas) nao entra.
+const corpoMisto = elementoDa("body", {}, [
+  elementoDa("section", {}, [
+    elementoDa("a", { href: "https://www.mercadolivre.com.br/itm/MLB-3456789012-caixa/MLB3456789012" }, [
+      textoDa("Caixa organizadora")
+    ]),
+    elementoDa("span", {}, [textoDa("359 visitas")]),
+    elementoDa("span", {}, [textoDa("50 vendas")])
+  ]),
+  elementoDa("aside", {}, [
+    elementoDa("a", { href: "https://www.mercadolivre.com.br/itm/MLB-5555555555-outro/MLB5555555555" }, [
+      textoDa("Produto de outra loja")
+    ]),
+    elementoDa("span", {}, [textoDa("+1.000 vendidos")])
+  ])
+]);
+const rMisto = varrerPagina(
+  documentoDa(corpoMisto),
+  "https://www.mercadolivre.com.br/anuncios/lista"
+);
+testar("#48: card com visitas continua", 359, rMisto["MLB3456789012"].visitas);
+testar("#48: produto alheio so com vendas nao entra", undefined, rMisto["MLB5555555555"]);
+
+console.log("");
+console.log("=== Rastro de origem - todo numero leva o texto de onde saiu ===");
+const rRastro = rMisto["MLB3456789012"];
+testar("rastro: trecho exato das visitas", "«359 visitas»", rRastro.origem.visitas.trecho);
+testar("rastro: trecho exato das vendas", "«50 vendas»", rRastro.origem.vendas.trecho);
+testar("rastro: tela mascarada", "/anuncios/lista", rRastro.origem.visitas.tela);
+
+// #37 num DOM: "<b>Visitas</b> 359 <b>Vendas</b> 12" - antes da correcao dava
+// vendas 359. O rastro das vendas mostra o dono de cada numero.
+const cardRotuloValor = elementoDa("section", {}, [
+  elementoDa("a", { href: "https://www.mercadolivre.com.br/itm/MLB-3456789012-caixa/MLB3456789012" }, [
+    textoDa("Caixa organizadora")
+  ]),
+  elementoDa("p", {}, [
+    elementoDa("b", {}, [textoDa("Visitas")]),
+    textoDa(" 359 "),
+    elementoDa("b", {}, [textoDa("Vendas")]),
+    textoDa(" 12")
+  ])
+]);
+const rRotuloValor = varrerPagina(
+  documentoDa(elementoDa("body", {}, [cardRotuloValor])),
+  "https://www.mercadolivre.com.br/anuncios/lista"
+);
+testar("#37 no DOM: visitas 359", 359, rRotuloValor["MLB3456789012"].visitas);
+testar("#37 no DOM: vendas 12 (nao 359)", 12, rRotuloValor["MLB3456789012"].vendas);
+testar("#37 no DOM: rastro das vendas", "Visitas 359 «Vendas 12»", rRotuloValor["MLB3456789012"].origem.vendas.trecho);
+
+// Gravacao: o rastro nao pode disparar "mudou" nem apagar a origem da outra
+// metrica; registro antigo sem rastro precisa ser renovado.
+testar("mudou ignora o rastro (mesmo numero)", false,
+  mudou({ visitas: 359, origem: { visitas: { em: 1 } } }, { visitas: 359, origem: { visitas: { em: 2 } } }));
+testar("mudou ve numero diferente", true, mudou({ visitas: 359 }, { visitas: 360 }));
+const mesclada = mesclarOrigem({ vendas: { trecho: "a" } }, { visitas: { trecho: "b" } }, 123, false);
+testar("mesclarOrigem guarda a origem da outra metrica", "a", mesclada.vendas.trecho);
+testar("mesclarOrigem carimba a hora", 123, mesclada.visitas.em);
+testar("faltaOrigem: registro antigo sem rastro", true, faltaOrigem({ visitas: 359 }, { visitas: 359 }));
+
+// Painel: so entra numero com rastro.
+const soVisitasProvadas = somenteComOrigem({ visitas: 359, vendas: 1000, origem: { visitas: { trecho: "x" } } });
+testar("painel: numero com rastro entra", 359, soVisitasProvadas.visitas);
+testar("painel: numero sem rastro nao entra", undefined, soVisitasProvadas.vendas);
+testar("painel: registro de versao antiga nao mostra nada", undefined, somenteComOrigem({ visitas: 359, vendas: 12 }).visitas);
+testar("painel: sem registro nao quebra", undefined, somenteComOrigem(undefined).visitas);
 
 console.log("");
 if (limitacoes.length > 0) {

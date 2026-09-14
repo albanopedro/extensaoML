@@ -13,6 +13,10 @@
       font-family: "Segoe UI", Roboto, Arial, sans-serif;
       font-size: 13px;
       color: #333;
+      /* Fundo explicito: sem ele, navegador ou visualizador em modo escuro
+         pinta o fundo de preto e o texto cinza some - justo na lista em que
+         a pessoa confere os numeros. */
+      background: #ffffff;
     }
 
     h1 {
@@ -30,22 +34,35 @@
     }
 
     #lista {
-      max-height: 180px;
+      max-height: 260px;
       overflow-y: auto;
       margin-bottom: 12px;
     }
 
     .item {
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
       padding: 5px 0;
       border-bottom: 1px solid #eee;
       font-size: 12px;
     }
 
+    .item .linha {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
     .item .codigo { color: #666; }
     .item .numeros { font-weight: 600; white-space: nowrap; }
+
+    /* O rastro de cada numero: de onde foi lido. Pequeno e cinza para nao
+       competir com o numero, mas sempre visivel - e ele que permite conferir. */
+    .item .origem {
+      margin-top: 2px;
+      font-size: 10.5px;
+      color: #888;
+      line-height: 1.35;
+      word-break: break-word;
+    }
 
     button {
       width: 100%;

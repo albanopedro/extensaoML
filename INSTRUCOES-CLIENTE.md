@@ -78,7 +78,21 @@ deles faz o navegador continuar usando a versão antiga:
 5. Agora abra um dos seus anúncios.
 
 6. Veja se aparece um **painel azul no canto superior direito**, com visitas,
-   vendas e conversão.
+   vendas e conversão. Um traço (—) no lugar de um número quer dizer que a
+   extensão não teve certeza e preferiu não mostrar.
+
+7. **Confira os números — é o passo mais importante.** Escolha 3 anúncios:
+   - Anote as visitas e as vendas que o **Mercado Livre** mostra para cada um
+     em "Minhas publicações".
+   - Clique no **ícone da extensão**. Cada anúncio aparece com os números e,
+     embaixo de cada número, **o pedaço de texto de onde ele foi lido** (a
+     parte entre « »), a tela e a hora.
+   - No painel azul de cada anúncio, **passe o mouse sobre um número**:
+     aparece a mesma origem.
+   - Os números da extensão precisam ser **iguais** aos do Mercado Livre.
+
+   A "Receita estimada" é uma conta (vendas × preço atual), não o faturamento
+   real — ela fica fora dessa conferência.
 
 ## O que me contar
 
@@ -86,7 +100,10 @@ Me manda um print de cada tela (a lista de publicações e o anúncio aberto) e
 me diz:
 
 - O aviso verde apareceu? Com qual número?
-- O painel azul apareceu? Os números batem com o que o Mercado Livre mostra?
+- O painel azul apareceu?
+- **Nos 3 anúncios que você conferiu, os números bateram com o Mercado Livre?**
+  Se algum não bateu, me mande o texto que aparece entre « » para ele (está
+  no ícone da extensão).
 - Apareceu algum número que você sabe que está errado?
 
 **Se nada aparecer, também me avisa** — é informação útil, não é problema.
