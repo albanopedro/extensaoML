@@ -175,7 +175,13 @@
     const temAmbos = (visitas !== undefined && vendas !== undefined);
 
     // visitasPorVenda e receita dividem por vendas: com 0 vendas nao ha o
-    // que calcular, entao essas duas continuam exigindo vendas > 0.
+    // que calcular, entao essas duas continuam exigindo vendas > 0. E a
+    // "vende a cada" ainda exige VISITAS: um anuncio pode ter vendas no
+    // cache sem nenhuma visita lida (a captura por telas nem sempre pega as
+    // duas; foi o que a pagina real /up/ mostrou com "1.000 vendas" e zero
+    // visitas). Dividir por 0 daria Infinity, e dividir indefinido daria
+    // NaN - os dois seriam impressos como "NaN visitas", numero com cara de
+    // certo que nao e. Sem visita, "vende a cada" nao tem o que responder.
     const temVendas = (vendas !== undefined && vendas > 0);
 
     return {
@@ -186,7 +192,7 @@
       conversao: temAmbos ? (vendas / visitas) * 100 : null,
 
       // Math.round porque "vende a cada 7,18 visitas" nao ajuda ninguem.
-      visitasPorVenda: temVendas ? Math.round(visitas / vendas) : null,
+      visitasPorVenda: (temVendas && visitas > 0) ? Math.round(visitas / vendas) : null,
 
       // Receita bruta acumulada. E estimativa: assume que todas as vendas
       // sairam pelo preco atual, o que ignora promocoes passadas.

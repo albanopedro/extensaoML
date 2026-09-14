@@ -131,7 +131,17 @@
 
     // Primeiro tentamos antes do rotulo, que e a ordem natural em portugues.
     const antes = ultimoNumeroColado(texto.slice(0, posicao));
-    if (antes !== null) return antes;
+
+    if (antes !== null) {
+      // Um ANO solto nao e metrica: "Ativo desde 2024 vendas" nao tem valor
+      // nenhum, o 2024 e a data em que o anuncio foi ativado. Rejeitamos
+      // apenas quando a palavra "desde" aparece imediatamente antes do
+      // numero - e ela que denuncia o contexto de tempo. Sem o "desde",
+      // "2024 vendas" pode ser metrica legitima (ele vendeu 2024 vezes) e
+      // nao pode ser bloqueado pelo tamanho do numero.
+      if (ehAnoPosDesde(texto.slice(0, posicao), antes)) return null;
+      return antes;
+    }
 
     // Se nao achou, tentamos depois - cobre "Visitas: 359".
     //
@@ -243,6 +253,36 @@
     const mes = parseInt(m[2], 10);
 
     return mes >= 1 && mes <= 12 && dia >= 1 && dia <= 31;
+  }
+
+  /**
+   * Diz se um valor achado antes do rotulo e um ANO solto precedido de
+   * "desde" - ou seja, data de ativacao/publicacao, nao metrica.
+   *
+   * So o "desde" justifica a rejeicao: um ano de 4 digitos sozinho ("2024
+   * vendas") pode perfeitamente ser contagem real de um anuncio popular.
+   * Ja "desde 2024" e sempre leitura de tempo - ninguem diz "desde" para
+   * apresentar uma quantidade vendida.
+   *
+   * @param {string} trecho o texto inteiro antes do rotulo, ja com o numero
+   * @param {number} valor o numero que foi extraido dele (antes do rotulo)
+   * @returns {boolean}
+   */
+  function ehAnoPosDesde(trecho, valor) {
+    // Anos plausiveis (1900-2099). Fora disso nao e ano, e metrica mesmo.
+    if (valor < 1900 || valor > 2099) return false;
+
+    // Acha de novo a posicao do numero que sera julgado (o ultimo do trecho
+    // - o mesmo que ultimoNumeroColado entregou).
+    const numeros = Array.from(trecho.matchAll(/\d[\d.,]*/g));
+    if (numeros.length === 0) return false;
+
+    const ultimo = numeros[numeros.length - 1];
+    const antesDoNumero = trecho.slice(0, ultimo.index);
+
+    // "Ativo desde 2024" termina em "desde " antes do numero.
+    // \s+$ cobre espaco e quebra de linha, e o "i" aceita "Desde".
+    return /desde\s+$/i.test(antesDoNumero);
   }
 
   /**
@@ -408,6 +448,48 @@
   }
 
   /**
+   * Diz se a pagina parece TELA DE VENDEDOR: alguma mencao a "visita".
+   *
+   * E o mesmo custo de pasta que usamos para achar "venda": o coletor
+   * diferencia as duas telas pelo vocabulario que cada uma usa. Pagina
+   * publica (busca, categoria, vitrine) tem "vendido" e "vendas" aos montes
+   * - todos de OUTRO vendedor - mas nunca "visita". A palavra "visita" so
+   * existe em telas que acompanham o anuncio de quem vende.
+   *
+   * Os guardas precisam ser os MESMOS da varredura principal: nao entrar em
+   * script/style/template e nao contar o que a propria extensao desenhou.
+   * Se o painel dissesse "Visitas" e contasse como sinal, um anuncio publico
+   * exibido com painel viraria "tela de vendedor" so por causa do painel.
+   *
+   * @param {Document} doc
+   * @returns {boolean} vale a pena varrer a pagina?
+   */
+  function paginaMencionaVisita(doc) {
+    const caminhante = doc.createTreeWalker(
+      doc.body,
+      NodeFilter.SHOW_TEXT,
+      aceitarNoDeTextoTecnico
+    );
+
+    let no = caminhante.nextNode();
+
+    while (no) {
+      const texto = (no.nodeValue || "").toLowerCase();
+      const elemento = no.parentElement;
+
+      if (elemento &&
+          !elemento.closest("#mlmetrics-painel, #mlmetrics-aviso") &&
+          texto.indexOf("visita") !== -1) {
+        return true;
+      }
+
+      no = caminhante.nextNode();
+    }
+
+    return false;
+  }
+
+  /**
    * Percorre todos os textos da pagina procurando rotulos de metrica.
    *
    * Usamos TreeWalker em vez de querySelectorAll("*") porque ele percorre
@@ -418,6 +500,12 @@
    * @returns {Object} mapa { MLB123: { visitas: 359 }, ... }
    */
   function varrerPagina(doc, url) {
+    // Pagina sem "visita" nao e tela de vendedor: qualquer "vendido" que ela
+    // mostre pertence a produto publico de OUTRO vendedor. A varredura
+    // inteira e descartada antes de comecar (sairia daqui cheia de numeros
+    // com cara de certo, que e o pior modo de erro deste coletor).
+    if (!paginaMencionaVisita(doc)) return {};
+
     const resultado = {};
 
     const caminhante = doc.createTreeWalker(
@@ -768,30 +856,46 @@
    * O coletor existe para as telas de vendedor, onde cada numero pertence
    * ao anuncio do seu card. Aqui a extensao so exibe, nunca captura.
    *
-   * Detectamos pelo HOST da URL: a vitrine publica do produto fica num
-   * subdominio proprio (produto.mercadolivre.com.br) que nenhuma tela de
-   * vendedor usa. Comparar texto nao e confiavel - as palavras dos botoes
-   * mudam e, pior, qualquer ocorrencia delas num <script> ou template
-   * oculto desligaria o coletor sem deixar rastro. E ler o textContent de
-   * toda a pagina, incluindo os JSONs dos scripts, era caro a cada varredura.
+   * Detectamos a vitrine pela URL. Dois sinais, ambos sujos de fingir que
+   * sao host ou caminho:
    *
-   * O parametro doc fica para preservar a assinatura de chamada, mas a
-   * decisao agora vem da URL.
+   *   - HOST: a vitrine classica mora em subdominio proprio
+   *     (produto.mercadolivre.com.br, articulo.mercadolivre.com.br) que
+   *     nenhuma tela de vendedor usa.
+   *   - CAMINHO: a estrutura NOVA (/up/MLBU...) e a de catalogo (/p/MLB...)
+   *     ficam no host www.mercadolivre.com.br - o MESMO das telas de
+   *     vendedor - entao o host sozinho nao basta. Nessas rotas o codigo do
+   *     produto e sempre o ultimo segmento do caminho, marca que nenhuma
+   *     tela de vendedor tem (as de vendedor carregam o codigo em
+   *     parametros, nunca no caminho).
    *
+   * Comparar texto nao e confiavel - as palavras dos botoes mudam e, pior,
+   * qualquer ocorrencia delas num <script> ou template oculto desligaria o
+   * coletor sem deixar rastro. E ler o textContent de toda a pagina,
+   * incluindo os JSONs dos scripts, era caro a cada varredura.
+   *
+   * Recebe a URL por parametro para poder ser testada fora do navegador.
+   *
+   * @param {string} url endereco da pagina (window.location.href)
    * @returns {boolean}
    */
-  function ehPaginaDeCompra(doc) {
-    const host = window.location.hostname;
+  function ehPaginaDeCompra(url) {
+    const host = new URL(url).hostname;
+    const path = new URL(url).pathname;
 
     return host.indexOf("produto.mercadolivre") !== -1 ||
-           host.indexOf("articulo.mercadolivre") !== -1;
+           host.indexOf("articulo.mercadolivre") !== -1 ||
+           // "/up/MLBU5098517614" (layout novo) e "/p/MLB12345678" (catalogo):
+           // o MLB como ultimo segmento do caminho = vitrine publica.
+           /\/up\/MLB[A-Z]?\d{6,}\/?$/.test(path) ||
+           /\/p\/MLB\d{6,}\/?$/.test(path);
   }
 
   /**
    * Varre e guarda, se este for um lugar de onde se deve coletar.
    */
   function coletar() {
-    if (ehPaginaDeCompra(document)) return;
+    if (ehPaginaDeCompra(window.location.href)) return;
 
     const achados = varrerPagina(document, window.location.href);
 
@@ -1044,8 +1148,12 @@
     try {
       chrome.storage.local.set({
         [CHAVE_DIAGNOSTICO]: {
-          // Sem a query string: ela pode carregar identificadores de sessao.
-          url: window.location.href.split("?")[0],
+          // So o HOST. A query pode carregar identificadores de sessao, e o
+          // CAMINHO pode carregar codigo de produto ou de vendedor - nenhum
+          // dos dois tem lugar num diagnostico que vai para o clipboard e
+          // para uma conversa. Para entender o formato da tela bastam o
+          // host e os trechos de texto das amostras.
+          url: window.location.hostname,
           quando: Date.now(),
           amostras: amostras
         }

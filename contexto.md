@@ -479,6 +479,65 @@ Mantenha estes IDs estáveis: eu vou me referir a eles pelo número.
 
 ---
 
+### GRUPO H — Descobertas em 14/09/2026 (pegando a página real)
+
+> A cliente/Pedro salvou a página real `teste/MLreal.html` (908 KB). Não é
+> "Minhas publicações" — é a **vitrine pública** de um anúncio da estrutura
+> nova (`www.mercadolivre.com.br/…/up/MLBU5098517614`). Ainda assim pegou dois
+> defeitos que a auditoria de 11/09 não cobriu porque **nunca tinha visto a
+> tela real**. Números de linha valem para o código antes das correções de hoje.
+
+#### #34 [CRÍTICO] Vitrine `/up/` e `/p/` no host `www` escapa do `ehPaginaDeCompra`
+
+- **Onde:** `src/coletor.js:783` — `ehPaginaDeCompra` só olhava
+  `produto.mercadolivre` / `articulo.mercadolivre`.
+- **Causa:** a estrutura nova mora em `www.mercadolivre.com.br/…/up/MLBU…` e o
+  catálogo em `…/p/MLB…` — hosts que as telas de vendedor TAMBÉM usam. Como a
+  URL da vitrine tem o código do produto no **caminho**, `contextoDoAnuncio`
+  assumia a página inteira como dele (`limite = doc.body`) e capturava
+  QUALQUER número com cara de métrica.
+- **Evidência (painel real salvo na página):** o produto tem 1 venda
+  ("Novo | 1 vendido"), e o painel mostrava **Vendas: 1.000 / Receita
+  estimada: R$ 19.900,00** — o "+1000 vendidos" de OUTRO produto na faixa
+  "Mais vendidos" foi atribuído a ele. Número errado com cara de certo,
+  exatamente o pior cenário do projeto, acontecendo de verdade.
+- **Correção (hoje):** `ehPaginaDeCompra(url)` agora recebe a URL e detecta a
+  vitrine por host **ou** pelas rotas `/up/MLB…` e `/p/MLB…` no fim do caminho
+  (marca que telas de vendedor não têm). Fica coberto por teste no harness.
+
+#### #35 [ALTO] Painel imprimia "Vende a cada: NaN visitas"
+
+- **Onde:** `src/content.js:189` — `visitasPorVenda: temVendas ? Math.round(visitas/vendas) : null`.
+- **Causa:** quando o cache tem `vendas` mas **nenhuma** `visitas` (a captura
+  por telas nem sempre pega as duas — foi o que a página real mostrou),
+  `Math.round(undefined / vendas)` = `NaN`; e `NaN !== null` passava na
+  montagem e virava texto "NaN visitas".
+- **Correção (hoje):** `visitasPorVenda` exige `visitas > 0` além de
+  `vendas > 0`. Coberto por teste.
+
+#### #36 [CRÍTICO] Coleta em páginas públicas (não-seller)
+
+- **Onde:** `src/coletor.js` — `varrerPagina` aceitava QUALQUER página do ML.
+- **Causa:** o coletor diferencia telas pelo vocabulário: página pública
+  (busca, categoria, vitrine) mostra "vendido"/"vendas" de OUTROS vendedores
+  aos montes; "visita" só existe em tela que acompanha o anúncio de quem
+  vende. Sem essa diferença em jogo, uma busca pública virava "coleta" e
+  enchia o cache com números de produtos alheios (dados públicos — não vaza
+  nada —, mas polui o diagnóstico e o painel da vendedora).
+- **Correção (hoje):** `paginaMencionaVisita(doc)` — primeira passada barata
+  com os MESMOS guardas da varredura principal (sem script/style/template e
+  ignorando o próprio painel `#mlmetrics-painel`); se a página não menciona
+  "visita", `varrerPagina` retorna `{}` antes de começar. A guarda do painel é
+  essencial: sem ela, o próprio painel ("Visitas totais") credenciaria uma
+  página pública como tela de vendedor.
+- **Teste:** stub de DOM fiel (só as APIs que o coletor usa: `textContent`,
+  `closest`, `querySelectorAll`, `getAttribute`, `parentElement`) no harness —
+  tela de vendedor entrega números, vitrine pública não entrega nada, painel
+  não credencia página pública, painel não interfere em tela de vendedor real.
+  Substitui as fixtures reais até chegarem; 78/78 PASS.
+
+---
+
 ## 6. Leitura de conjunto (o diagnóstico de fundo)
 
 A arquitetura está certa e os comentários mostram que o risco correto foi antecipado:
@@ -542,4 +601,8 @@ paramos.
 | 5 — Robustez | ✅ feito | 11/09/2026 | #13, #11, #12, #21. A fila `comCache` serializa get/set na mesma aba; entre abas a corrida persiste (nao resolvido - o SW do #6 moveu so o fetch, nao a escrita). |
 | 6 — Rede | ✅ feito | 11/09/2026 | #6 (fetch movido p/ service worker c/ host_permissions), #17 (origens nao guardam URL de anuncio isolado), #20 (diagnostico so guarda janela do rotulo), #32 (INSTRUCOES sincera). sniffer.js removido (era item do #29). |
 | 7 — Acabamento | ✅ feito | 11/09/2026 | #15, #22, #25, #26, #27, #28, #30, #31. #15 em sniffer (fora do manifest prod.). #25 ja feito no #11. |
-| 8 — Arremate | ✅ feito | 14/09/2026 | Criado `teste/test-parsing.js` (harness Node, 48 casos, TODOS PASS, exit 0): cobre #1/#4/#23/#24, o gabarito das fixtures e os formatos MLB. `.git/.MERGE_MSG.swp` — o do #33 EXISTIA de verdade (dentro de `.git/`, por isso nao foi achado antes) — apagado. Comentario `coletor.js:569` tipado ("varre duras" → "varreduras"). Limitacao conhecida, deixada de proposito e documentada no teste: `"Ativo desde 2024 vendas"` ainda retorna 2024 (residuo do #1) — rever quando decidirmos uma regra de contexto; correr é arriscado porque "2024 vendas" pode ser metrica legitima. |
+| 8 — Arremate | ✅ feito | 14/09/2026 | Criado `teste/test-parsing.js` (harness Node, 52 casos, TODOS PASS, exit 0): cobre #1/#4/#23/#24, o gabarito das fixtures, os formatos MLB e a regra "desde". `.git/.MERGE_MSG.swp` — o do #33 EXISTIA de verdade (dentro de `.git/`, por isso nao foi achado antes) — apagado. Comentario `coletor.js:569` tipado. **Residuo do #1 resolvido com regra estreita**: `ehAnoPosDesde` rejeita ano solto (1900–2099) só quando precedido imediatamente de "desde" ("Ativo desde 2024 vendas" → null); "2024 vendas" sem "desde" continua valendo. Regra nova e reversível — observar se a tela real mostra "desde" antes de métrica real (improvável). |
+| 9 — Sanidade | ✅ feito | 14/09/2026 | `node --check` em todos os JS, `manifest.json` validado, 4 ícones são PNG reais e não vazios. |
+| 10 — Página real | ✅ feito | 14/09/2026 | A cliente salvou `teste/MLreal.html` (vitrine `/up/` real, não é "Minhas publicações"). **#34** (vitrine `/up/` e `/p/` no host `www` escapava do `ehPaginaDeCompra` → capturava "+1000 vendidos" de outro produto; painel real mostrou 1.000 vendas / R$ 19.900 para 1 venda) e **#35** ("Vende a cada: NaN visitas") corrigidos e cobertos no harness (agora 69/69 PASS). **PENDENTE — PRIVACIDADE:** `MLreal.html` + `MLreal_files/` têm dados reais (nomes de produto, vendedor, JSONs de sessão) — **não commitar**; descartar ou transformar em fixture sanitizada. |
+| 11 — Privacidade | ✅ feito | 14/09/2026 | Auditoria de vazamento: **a única requisição de rede da extensão é o `fetch` do background para telas de vendedor aprendidas (domínios do ML, com a sessão dela)** — nada de analytics/beacon/imagem remota, manifest não permite código remoto. Blindagens aplicadas: (1) diagnóstico agora grava só `window.location.hostname` (antes guardava caminho, que pode ter código de produto/vendedor); (2) criado `.gitignore` com `teste/MLreal*` para página real nunca entrar no repo. O que sai do computador (via "Copiar diagnóstico", manualmente) = códigos MLB + números + hostname + amostras de texto. |
+| 12 — Coleta só em tela de vendedor | ✅ feito | 14/09/2026 | **#36** — `paginaMencionaVisita(doc)` + desvio cedo em `varrerPagina`: página pública (só "vendido") não entrega número nenhum. Stub de DOM fiel (sem dependência externa) no harness cobrindo o caso real de `/up/` — agora **78/78 PASS**. Pedido da cliente após esclarecer a política de privacidade ("não quero que nenhum dado vaze"): a trava é por comportamento (vocabulário "visita"), não por URL adivinhada — então quando a tela real de "Minhas publicações" chegar, se ela tiver "visitas", a captura continua funcionando sem eu ter chutado endereço. |
