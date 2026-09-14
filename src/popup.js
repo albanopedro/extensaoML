@@ -18,11 +18,14 @@
   const CHAVE_CACHE = "mlmetrics_dados";
   const CHAVE_DIAGNOSTICO = "mlmetrics_diagnostico";
   // Telas de vendedor que ja entregaram numeros. Entram no relatorio copiado
-  // para o diagnostico remoto dizer QUAIS telas a extensao reconheceu - e
-  // para nos mostrarmos o endereco exato de "Minhas publicacoes" sem o usuario
-  // precisar navegar ate ele. Nao e dado novo: o coletor ja guarda estas
-  // URLs; o popup so as inclui quando o botao e clicado.
+  // para o diagnostico remoto dizer QUAIS telas a extensao reconheceu. Vao
+  // MASCARADAS (ver enderecoMascarado): a forma da rota basta para achar
+  // "Minhas publicacoes", sem levar id de vendedor ou de anuncio junto.
   const CHAVE_ORIGENS = "mlmetrics_origens";
+
+  // Toda chave da extensao no storage comeca com este prefixo. O botao
+  // "Limpar dados guardados" apaga pelo prefixo - ver la o porque.
+  const PREFIXO_CHAVES = "mlmetrics_";
 
   const resumo = document.getElementById("resumo");
   const lista = document.getElementById("lista");
@@ -95,18 +98,109 @@
     }
   }
 
+  /**
+   * Endereco de origem sem o que pode identificar alguem.
+   *
+   * Mesma regra do caminhoMascarado do coletor.js - duplicada porque o popup
+   * nao carrega os scripts de conteudo. Mantem o host e a FORMA da rota;
+   * digitos viram "#" e titulo de produto (slug com muitos hifens) vira
+   * "(titulo)".
+   *
+   * As origens entram no relatorio para mostrar quais telas de vendedor a
+   * extensao reconheceu, e a forma da rota basta para isso. O caminho cru
+   * podia levar id de vendedor ou de anuncio para a conversa - justamente o
+   * que o diagnostico deixou de guardar por privacidade.
+   *
+   * @param {string} url
+   * @returns {string}
+   */
+  function enderecoMascarado(url) {
+    try {
+      const endereco = new URL(url);
+      const caminho = endereco.pathname.split("/").map(function (trecho) {
+        if (trecho.split("-").length > 3) return "(titulo)";
+        return trecho.replace(/\d+/g, "#");
+      }).join("/");
+      return endereco.hostname + caminho;
+    } catch (e) {
+      return "(endereco invalido)";
+    }
+  }
+
+  /**
+   * Pede a aba ativa o diagnostico da tela aberta nela (coletor.js,
+   * diagnosticarTelaAtual).
+   *
+   * O diagnostico guardado no storage e da ultima pagina que falhou, em
+   * qualquer aba e ha qualquer tempo - nao necessariamente da tela que a
+   * pessoa esta olhando quando clica no botao. Perguntar a aba resolve isso.
+   * Nao pede permissao nova: sem "tabs", chrome.tabs.query so esconde a URL
+   * das abas, e o id (que e o que usamos) continua disponivel.
+   *
+   * Quando a aba nao responde, o motivo vai escrito no relatorio. O silencio
+   * ja e diagnostico: aba que nao e do Mercado Livre, ou aba aberta antes de
+   * a extensao ser recarregada (precisa de F5).
+   *
+   * @param {Function} pronto recebe o diagnostico ou o motivo - sempre chamada
+   */
+  function pedirDiagnosticoDaAba(pronto) {
+    const SEM_RESPOSTA = {
+      erro: "A aba aberta não respondeu. Ou ela não é uma página do Mercado " +
+            "Livre, ou foi aberta antes de a extensão ser recarregada — nesse " +
+            "caso, aperte F5 nela e clique de novo."
+    };
+
+    try {
+      chrome.tabs.query({ active: true, currentWindow: true }, function (abas) {
+        if (chrome.runtime.lastError || !abas || abas.length === 0) {
+          pronto(SEM_RESPOSTA);
+          return;
+        }
+
+        // frameId 0: so o documento principal - o coletor nao roda em iframes.
+        chrome.tabs.sendMessage(
+          abas[0].id,
+          { tipo: "diagnosticar" },
+          { frameId: 0 },
+          function (resposta) {
+            // Ler o lastError e obrigatorio: "ninguem escutando" e o caso
+            // comum aqui, e sem a leitura o navegador reclama no console.
+            if (chrome.runtime.lastError || !resposta) {
+              pronto(SEM_RESPOSTA);
+              return;
+            }
+            pronto(resposta);
+          }
+        );
+      });
+    } catch (e) {
+      pronto(SEM_RESPOSTA);
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Acoes
   // --------------------------------------------------------------------------
 
   document.getElementById("limpar").addEventListener("click", function () {
-    // Apaga so as nossas chaves, nao o storage inteiro. Hoje da na mesma,
-    // mas evita surpresa se a extensao passar a guardar outra coisa.
+    // Apaga TODAS as chaves da extensao - tudo que comeca com PREFIXO_CHAVES -
+    // e nada alem delas. Listar as chaves uma a uma ja falhou: o botao
+    // apagava cache e diagnostico mas deixava as origens aprendidas e a trava
+    // da busca automatica, e origens envenenadas por uma versao antiga
+    // sobreviviam a limpeza. Pelo prefixo, chave nova ja nasce coberta.
     try {
-      chrome.storage.local.remove([CHAVE_CACHE, CHAVE_DIAGNOSTICO], function () {
+      chrome.storage.local.get(null, function (tudo) {
         if (chrome.runtime.lastError) return;  // contexto invalidado
-        avisar("Dados apagados.");
-        desenhar();
+
+        const nossas = Object.keys(tudo).filter(function (chave) {
+          return chave.indexOf(PREFIXO_CHAVES) === 0;
+        });
+
+        chrome.storage.local.remove(nossas, function () {
+          if (chrome.runtime.lastError) return;
+          avisar("Dados apagados.");
+          desenhar();
+        });
       });
     } catch (e) {
       // contexto invalidado: popup inteiro e recarregado pelo navegador
@@ -114,6 +208,19 @@
   });
 
   document.getElementById("copiar").addEventListener("click", function () {
+    // Primeiro a tela aberta AGORA (pedirDiagnosticoDaAba), depois o que
+    // esta guardado. As duas partes vao juntas no mesmo relatorio.
+    pedirDiagnosticoDaAba(function (telaAtual) {
+      montarRelatorio(telaAtual);
+    });
+  });
+
+  /**
+   * Junta a tela atual com o que esta guardado e entrega o relatorio.
+   *
+   * @param {Object} telaAtual resposta da aba ativa, ou o motivo do silencio
+   */
+  function montarRelatorio(telaAtual) {
     try {
       chrome.storage.local.get(
         [CHAVE_CACHE, CHAVE_DIAGNOSTICO, CHAVE_ORIGENS],
@@ -125,11 +232,17 @@
           const relatorio = JSON.stringify({
             versao: chrome.runtime.getManifest().version,
             geradoEm: new Date().toISOString(),
-            // As telas de vendedor reconhecidas (até 3). Sao o caminho mais
-            // direto para confirmar que estamos olhando a página certa.
-            origens: guardado[CHAVE_ORIGENS] || [],
+            // A tela que a pessoa esta olhando, lida no clique: o que o
+            // coletor enxerga nela e o que capturaria agora.
+            telaAtual: telaAtual,
+            // As telas de vendedor reconhecidas (ate 3), mascaradas. Sao o
+            // caminho mais direto para confirmar que estamos olhando a pagina
+            // certa.
+            origens: (guardado[CHAVE_ORIGENS] || []).map(enderecoMascarado),
             capturado: guardado[CHAVE_CACHE] || {},
-            diagnostico: guardado[CHAVE_DIAGNOSTICO] || null
+            // O ultimo diagnostico gravado sozinho, de qualquer aba. Pode ser
+            // de outra tela - por isso a telaAtual vem antes.
+            ultimoDiagnosticoGuardado: guardado[CHAVE_DIAGNOSTICO] || null
           }, null, 2);
 
           navigator.clipboard.writeText(relatorio).then(function () {
@@ -149,7 +262,7 @@
     } catch (e) {
       // contexto invalidado: popup inteiro e recarregado pelo navegador
     }
-  });
+  }
 
   desenhar();
 })();

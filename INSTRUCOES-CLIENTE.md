@@ -8,22 +8,25 @@ Duas coisas importantes:
 
 - **Não vou pedir a sua senha do Mercado Livre**, e você não deve me passar.
   A extensão funciona dentro do seu navegador, com você já logada. Ela não
-  envia nada para lugar nenhum — nenhum número sai do seu computador.
+  envia nada para lugar nenhum: os números ficam guardados no seu navegador.
+  Só sai o que você mesma decidir me mandar — um print ou o "Copiar
+  diagnóstico" (explicado lá embaixo).
 - **Guarde a pasta num lugar definitivo** antes de instalar (Documentos, por
   exemplo). Se ela for movida ou apagada depois, a extensão para de funcionar.
 
 ### O que a extensão faz por conta própria
 
-Com alguma extensão do Mercado Livre aberta, a ML Metrics visita sozinha, a
-cada 2 horas, as telas de vendedor que já capturaram dados — para atualizar
-os números sem você precisar passar por todas elas de novo. Isso acontece
-dentro do seu navegador, com você já logada. É um comportamento silencioso:
-você não precisa fazer nada, e pode notá-lo como se a página "abrisse e
-fechasse" sozinha de vez em quando.
+Com alguma página do Mercado Livre aberta, a ML Metrics consulta sozinha, no
+máximo a cada 2 horas, as telas de vendedor em que ela já capturou dados —
+para atualizar os números sem você precisar passar por elas de novo.
 
-Como essa visita automática acontece com a sua sessão do Mercado Livre, evite
-ter dúvidas de segurança: as telas são consultadas de forma idêntica a um
-acesso seu de verdade, sem pressa nem repetições em série.
+Essa consulta é **invisível**: nenhuma aba ou janela abre. Se você vir uma
+página abrindo e fechando sozinha, não é a extensão.
+
+Ela usa a sua sessão do Mercado Livre (você já logada), mas não é igual a
+você abrir a tela: é só uma leitura rápida do texto, sem carregar o resto da
+página. Por isso ela acontece poucas vezes, e só nas telas de vendedor que
+você mesma já abriu.
 
 ## Instalando
 
@@ -44,13 +47,21 @@ acesso seu de verdade, sem pressa nem repetições em série.
 
 ## Depois de uma atualização
 
-Quando eu mandar uma versão nova, é preciso pedir ao navegador que recarregue
-a extensão — sem isso ela continua usando a versão antiga:
+Quando eu mandar uma versão nova, siga os passos na ordem — pular qualquer um
+deles faz o navegador continuar usando a versão antiga:
 
-1. Abra `edge://extensions` (ou `chrome://extensions`).
-2. No quadrinho da **ML Metrics**, clique no **ícone de recarregar** (a seta
-   circular que fica no canto do quadrinho).
-3. Pronto. Pode repetir o teste.
+1. Descompacte o arquivo novo e **coloque os arquivos dele no lugar dos
+   antigos, na mesma pasta** que você escolheu na instalação. Não carregue a
+   pasta nova como uma segunda extensão: ficariam duas ML Metrics ligadas ao
+   mesmo tempo.
+2. Abra `edge://extensions` (ou `chrome://extensions`).
+3. No quadrinho da **ML Metrics**, clique no **ícone de recarregar** (a seta
+   circular que fica no canto do quadrinho). Confira se o número da versão é
+   o que eu mandei (ele aparece no quadrinho ou em **Detalhes**).
+4. **Aperte F5 em todas as abas do Mercado Livre que estiverem abertas.** A
+   extensão só volta a funcionar numa aba depois que ela é recarregada — sem
+   o F5, a aba fica sem extensão e parece que nada aparece.
+5. Pronto. Pode repetir o teste.
 
 ## Testando
 
@@ -87,14 +98,22 @@ com base no que está escrito nela que eu ajusto o programa.
 Se você não conseguir mandar print, dá para mandar um relatório pronto, só com
 texto:
 
-1. Vá até a tela que quer me mostrar (por exemplo, "Minhas publicações").
+1. Vá até a tela que quer me mostrar (por exemplo, "Minhas publicações") e
+   espere ela carregar por completo.
 2. Clique no **ícone da extensão** (o quadradinho da ML Metrics no topo).
 3. Clique no botão **"Copiar diagnóstico"**.
-4. Cole o texto aqui na conversa.
+4. Cole o texto aqui na conversa. Se o navegador não deixar copiar, o texto
+   aparece numa caixa dentro da janelinha: clique nela, aperte Ctrl+A e
+   depois Ctrl+C.
 
-O relatório traz quais telas de vendedor a extensão reconheceu, os números
-guardados e — quando algo não foi capturado — pedaços do texto da tela. É a
-forma mais rápida de eu ver o que está acontecendo no seu navegador.
+O relatório lê a tela que está aberta **no momento do clique** e mostra o que
+a extensão enxergou nela. Também traz quais telas de vendedor ela já
+reconheceu e os números guardados. Os endereços vão sem números e sem nome de
+produto. É a forma mais rápida de eu ver o que está acontecendo no seu
+navegador.
+
+Se o relatório disser que **"a aba aberta não respondeu"**, aperte F5 nessa
+aba, espere carregar e clique de novo.
 
 ## Se quiser desinstalar
 

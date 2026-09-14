@@ -2,3 +2,7 @@
 # contem nomes de produto, vendedor e JSONs de sessao do Mercado Livre.
 teste/MLreal*
 teste/testenomantereal*
+
+# Pacotes gerados pelo empacotar.ps1 - sao refeitos a partir de src/ a
+# qualquer momento e nao pertencem ao repositorio.
+dist/

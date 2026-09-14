@@ -20,20 +20,26 @@
   // Identificadores de anuncio do Mercado Livre.
   //
   // Existem varios formatos, e a letra opcional depois de "MLB" faz parte
-  // do codigo - NAO e ruido a ser descartado. "MLBU5098517614" e
-  // "MLB5098517614" sao identificadores diferentes, de espacos distintos.
+  // do codigo - NAO e ruido a ser descartado. "MLBU1234567890" e
+  // "MLB1234567890" sao identificadores diferentes, de espacos distintos.
   // Por isso capturamos o prefixo e os digitos em grupos separados e
   // remontamos: o unico caractere que sumiu e o hifen.
   //
   //   MLB-3456789012   ->  MLB3456789012    anuncio (produto.mercadolivre)
   //   MLB12345678      ->  MLB12345678      produto de catalogo (/p/)
-  //   MLBU5098517614   ->  MLBU5098517614   estrutura nova (/up/)
+  //   MLBU1234567890   ->  MLBU1234567890   estrutura nova (/up/)
   const PADRAO_CODIGO = /(MLB[A-Z]?)-?(\d{6,})/;
 
   // A partir de quantos dias o dado passa a ser exibido como suspeito.
   // Tres dias e curto o bastante para que um anuncio ativo nao pareca
   // parado, e longo o bastante para nao alarmar por causa de um fim de semana.
   const DIAS_PARA_ALERTA = 3;
+
+  // Codigo do anuncio cujo painel a pessoa fechou nesta aba. Para esse
+  // anuncio o painel nao volta sozinho - nem por gravacao nova no cache, nem
+  // pelo poller de URL. Vive so na memoria da aba: recarregar a pagina (F5)
+  // mostra o painel de novo.
+  let fechadoPara = null;
 
   // --------------------------------------------------------------------------
   // Leitura
@@ -49,6 +55,22 @@
 
     // match[1] e o prefixo ("MLB" ou "MLBU"), match[2] sao os digitos.
     return match ? match[1] + match[2] : null;
+  }
+
+  /**
+   * Diz se a extensao ainda esta viva para este script.
+   *
+   * Mesma regra do coletor.js: extensao recarregada deixa o script das abas
+   * abertas orfao, e o sinal e o chrome.runtime.id sumir.
+   *
+   * @returns {boolean}
+   */
+  function extensaoViva() {
+    try {
+      return Boolean(chrome.runtime && chrome.runtime.id);
+    } catch (e) {
+      return false;
+    }
   }
 
   /**
@@ -188,8 +210,11 @@
       visitas: (visitas !== undefined) ? visitas : null,
       vendas: (vendas !== undefined) ? vendas : null,
 
-      // 0% e dado (converteu nada); null e ausencia (nao sei).
-      conversao: temAmbos ? (vendas / visitas) * 100 : null,
+      // 0% e dado (converteu nada); null e ausencia (nao sei). Mas sem
+      // nenhuma visita nao existe taxa: 0 vendas / 0 visitas daria NaN e
+      // 3 / 0 daria Infinity, impressos como "NaN%" e "Infinity%". E anuncio
+      // recem-criado ("0 visitas, 0 vendas") e caso comum, nao excecao.
+      conversao: (temAmbos && visitas > 0) ? (vendas / visitas) * 100 : null,
 
       // Math.round porque "vende a cada 7,18 visitas" nao ajuda ninguem.
       visitasPorVenda: (temVendas && visitas > 0) ? Math.round(visitas / vendas) : null,
@@ -237,8 +262,9 @@
    * Botao que fecha o painel.
    *
    * O painel e fixo na tela e nao faz parte do layout do ML; sem como fecha-lo
-   * e preciso recarregar a pagina para faze-lo sumir. O botao remove o painel;
-   * o proximo navegar/render volta a mostra-lo, entao o uso normal continua.
+   * e preciso recarregar a pagina para faze-lo sumir. O botao remove o painel
+   * e anota o anuncio em fechadoPara: enquanto a aba nao for recarregada, o
+   * painel DAQUELE anuncio nao volta sozinho. Outro anuncio abre normalmente.
    */
   function criarBotaoFechar(painel) {
     const botao = document.createElement("button");
@@ -247,6 +273,9 @@
     botao.title = "Fechar painel";
     botao.textContent = "×";
     botao.addEventListener("click", function () {
+      // Anotar antes de remover: uma gravacao no cache que chegue entre os
+      // dois passos ja encontra o anuncio marcado como fechado.
+      fechadoPara = extrairCodigoAnuncio();
       painel.remove();
     });
     return botao;
@@ -378,19 +407,30 @@
       return;
     }
 
+    // A pessoa fechou o painel deste anuncio: respeitamos (ver fechadoPara).
+    if (codigoNoInicio === fechadoPara) return;
+
     // chrome.storage e assincrono: devolve por callback, nao por retorno.
     // Toda a montagem do painel acontece dentro dele, ja com o dado em maos.
     try {
       chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
         if (chrome.runtime.lastError) return;  // contexto invalidado
 
-        // A pagina mudou enquanto o storage respondia: nada a fazer aqui.
+        // A pagina mudou enquanto o storage respondia, ou a pessoa fechou o
+        // painel nesse meio tempo: nada a fazer aqui.
         if (extrairCodigoAnuncio() !== codigoNoInicio) return;
+        if (codigoNoInicio === fechadoPara) return;
 
         const cache = guardado[CHAVE_CACHE] || {};
         const dados = cache[codigoNoInicio];
 
         if (!dados) {
+          // Sem dado deste anuncio. Um painel com numeros que ainda esteja na
+          // tela sai - e o que acontece logo depois de "Limpar dados
+          // guardados", quando o cache inteiro some.
+          const anterior = document.getElementById(PREFIXO + "-painel");
+          if (anterior) anterior.remove();
+
           // So mostramos o painel vazio quando HA outros anuncios capturados.
           // Se o cache esta vazio, a pessoa provavelmente esta navegando como
           // compradora - o painel so faria ruido sobre todo produto que abrir.
@@ -423,7 +463,17 @@
   // solucao que nao depende de detalhe interno do site.
   let urlAnterior = window.location.href;
 
-  setInterval(function () {
+  const poller = setInterval(function () {
+    // Extensao recarregada: este script ficou orfao (ver extensaoViva).
+    // Paramos o poller e tiramos o painel - numero de uma versao que ja nao
+    // roda nao deve ficar na tela. A versao nova entra no F5 da pagina.
+    if (!extensaoViva()) {
+      clearInterval(poller);
+      const anterior = document.getElementById(PREFIXO + "-painel");
+      if (anterior) anterior.remove();
+      return;
+    }
+
     if (window.location.href === urlAnterior) return;
 
     urlAnterior = window.location.href;
@@ -443,7 +493,20 @@
       if (area !== "local") return;
       if (!mudancas[CHAVE_CACHE]) return;
 
-      // A URL ja foi conferida por extrairCodigoAnuncio dentro de atualizar.
+      // Qualquer gravacao no cache dispara este evento: de outra aba, de
+      // outro anuncio, ou so a renovacao periodica da data. Remontar o painel
+      // a cada uma fazia ele piscar - e voltar depois de fechado. So reagimos
+      // quando o registro DO ANUNCIO DA TELA mudou de verdade.
+      const codigo = extrairCodigoAnuncio();
+      if (!codigo) return;
+
+      const antes = (mudancas[CHAVE_CACHE].oldValue || {})[codigo];
+      const depois = (mudancas[CHAVE_CACHE].newValue || {})[codigo];
+
+      // JSON.stringify compara o conteudo: objetos lidos do storage nunca sao
+      // o mesmo objeto, entao === diria sempre "diferente".
+      if (JSON.stringify(antes) === JSON.stringify(depois)) return;
+
       atualizar();
     });
   } catch (e) {

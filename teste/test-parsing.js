@@ -9,8 +9,11 @@
 //   - os casos da auditoria (problemas #1, #4, #23, #24 do contexto.md)
 //   - o gabarito das fixtures de teste/ (publicacoes.html e o anuncio)
 //   - a formatacao dos codigos MLB (a letra apos "MLB" faz parte do codigo)
-//   - o escopo de coleta (ehPaginaDeCompra, inclui as rotas /up/ e /p/)
-//   - o calculo do painel (calcular, guarda contra NaN)
+//   - o que vem depois do numero (#41: %, data sem ano, hora, periodo)
+//   - o escopo de coleta (ehPaginaDeCompra, inclui /up/, /p/ e /p/.../s)
+//   - o calculo do painel (calcular, guarda contra NaN e Infinity)
+//   - o texto oculto que nao pode virar metrica (#52: noscript, [hidden])
+//   - o que o diagnostico leva de endereco (caminhoMascarado)
 //
 // Sem navegador de proposito: o que testamos aqui nao toca em DOM nem em
 // chrome.storage - sao funcoes puras, entao o resultado e deterministico.
@@ -127,6 +130,7 @@ const blocoFuncoes = [
   "primeiroNumeroColado",
   "temLetra",
   "ehData",
+  "seguidoDeUnidade",
   "ehAnoPosDesde",
   "ehPaginaDeCompra",
   "aceitarNoDeTextoTecnico",
@@ -135,7 +139,8 @@ const blocoFuncoes = [
   "contextoDoAnuncio",
   "valorDoRotulo",
   "descartarImplausiveis",
-  "varrerPagina"
+  "varrerPagina",
+  "caminhoMascarado"
 ].map(function (nome) { return extrairFuncao(fonte, nome); }).join("\n");
 
 // O calculo do painel mora no content.js - tambem funcao pura.
@@ -161,6 +166,8 @@ const codigoAvaliado = blocoConstantes + "\n" + blocoFuncoes + "\n" +
   "  temLetra: temLetra," +
   "  ehData: ehData," +
   "  ehAnoPosDesde: ehAnoPosDesde," +
+  "  seguidoDeUnidade: seguidoDeUnidade," +
+  "  caminhoMascarado: caminhoMascarado," +
   "  ehPaginaDeCompra: ehPaginaDeCompra," +
   "  aceitarNoDeTextoTecnico: aceitarNoDeTextoTecnico," +
   "  paginaMencionaVisita: paginaMencionaVisita," +
@@ -185,6 +192,8 @@ const {
   numeroAntesDe,
   temLetra,
   ehData,
+  seguidoDeUnidade,
+  caminhoMascarado,
   ultimoNumeroColado,
   primeiroNumeroColado,
   ehPaginaDeCompra,
@@ -275,6 +284,25 @@ testar("anuncio: 'Novo | 1 vendido'", 1, numeroAntesDe("Novo | 1 vendido", "vend
 testar("anuncio: '+1.000 vendas' (reputacao)", 1000, numeroAntesDe("+1.000 vendas", "venda"));
 
 console.log("");
+console.log("=== #41 - o que vem DEPOIS do numero ===");
+// Numero seguido de percentual, data sem ano, hora, periodo ou milhar
+// abreviado nao e o valor do rotulo.
+testar("'Ultima visita 14/09' (data sem ano)", null, numeroAntesDe("Ultima visita 14/09", "visita"));
+testar("'Ultima venda 14:32' (hora)", null, numeroAntesDe("Ultima venda 14:32", "venda"));
+testar("'Visitas +12%' (variacao)", null, numeroAntesDe("Visitas +12%", "visita"));
+testar("'Tarifa de venda 16%' (taxa)", null, numeroAntesDe("Tarifa de venda 16%", "venda"));
+testar("'Vendas (30 dias) 12' (periodo)", null, numeroAntesDe("Vendas (30 dias) 12", "venda"));
+testar("'Visitas 12 mil' (milhar abreviado)", null, numeroAntesDe("Visitas 12 mil", "visita"));
+testar("'+12% visitas' (percentual antes do rotulo)", null, numeroAntesDe("+12% visitas", "visita"));
+// O que NAO pode quebrar: palavra comum depois do numero continua valendo.
+testar("'Visitas: 359' continua valendo", 359, numeroAntesDe("Visitas: 359", "visita"));
+testar("'Visitas 359 hoje' - 'h' nao casa com 'hoje'", 359, numeroAntesDe("Visitas 359 hoje", "visita"));
+testar("'Vendas 12 de 40' - 'd' nao casa com 'de'", 12, numeroAntesDe("Vendas 12 de 40", "venda"));
+testar("'Visitas 359 minhas' - 'min' nao casa com 'minhas'", 359, numeroAntesDe("Visitas 359 minhas", "visita"));
+testar("seguidoDeUnidade(' dias')", true, seguidoDeUnidade(" dias"));
+testar("seguidoDeUnidade(' meses')", true, seguidoDeUnidade(" meses"));
+
+console.log("");
 console.log("=== temLetra (#23) ===");
 testar("'u' maiusculo acentuado", true, temLetra("Ü"));
 testar("'ü' (U+00FC) e letra", true, temLetra("ü"));
@@ -313,7 +341,7 @@ function codigoDe(texto) {
   return m ? m[1] + m[2] : null;
 }
 testar("anuncio com hifen", "MLB3456789012", codigoDe("MLB-3456789012"));
-testar("estrutura nova MLBU", "MLBU5098517614", codigoDe("MLBU5098517614"));
+testar("estrutura nova MLBU", "MLBU0000000001", codigoDe("MLBU0000000001"));
 testar("produto de catalogo", "MLB12345678", codigoDe("MLB12345678"));
 testar("com codigo no meio do path", "MLB3456789012", codigoDe("produto.mercadolivre.com.br/MLB-3456789012-capa-extrusora-p/"));
 testar("codigo curto nao vale", null, codigoDe("MLB12"));
@@ -329,8 +357,9 @@ testar("vendas cobre 'vendida'", true, ROTULOS.vendas.indexOf("vendida") !== -1)
 
 console.log("");
 console.log("=== ehPaginaDeCompra (#34 - vitrine publica nao captura) ===");
-// A pagina REAL que gerou o bug: www + rota nova /up/MLBU...
-testar("www + /up/MLBU... e vitrine", true, ehPaginaDeCompra("https://www.mercadolivre.com.br/kit-2-omnibox-caixa-organizadora-modular-empilhavel-mbasic/up/MLBU5098517614"));
+// A mesma forma da pagina real que gerou o bug (www + rota nova /up/MLBU...),
+// com slug e codigo ficticios: o endereco real nao entra no repositorio.
+testar("www + /up/MLBU... e vitrine", true, ehPaginaDeCompra("https://www.mercadolivre.com.br/kit-2-caixa-organizadora-modular/up/MLBU0000000001"));
 // Vitrine classica (host proprio) e catalogo (rota /p/MLB...).
 testar("produto.mercadolivre e vitrine", true, ehPaginaDeCompra("https://produto.mercadolivre.com.br/MLB-3456789012-capa-extrusora-p/MLB3456789012"));
 testar("articulo.mercadolivre e vitrine", true, ehPaginaDeCompra("https://articulo.mercadolivre.com.br/MLB-1234567890-x/MLB1234567890"));
@@ -339,6 +368,11 @@ testar("www + rota /p/MLB... e vitrine", true, ehPaginaDeCompra("https://www.mer
 testar("minhas publicacoes nao e vitrine", false, ehPaginaDeCompra("https://www.mercadolivre.com.br/herramientas/publicaciones"));
 testar("ranking de vendas nao e vitrine", false, ehPaginaDeCompra("https://www.mercadolivre.com.br/gz/ranking"));
 testar("query com codigo nao e vitrine", false, ehPaginaDeCompra("https://www.mercadolivre.com.br/busca?item_id=MLB1234567890"));
+// #55: a lista de vendedores do catalogo ("/p/MLB.../s") tambem e vitrine,
+// cheia de "+N vendas" de reputacao de vendedores alheios.
+testar("www + /p/MLB.../s e vitrine", true, ehPaginaDeCompra("https://www.mercadolivre.com.br/kit-2-caixa-organizadora/p/MLB1045308375/s"));
+testar("www + /up/MLBU.../ com barra final e vitrine", true, ehPaginaDeCompra("https://www.mercadolivre.com.br/kit/up/MLBU0000000001/"));
+testar("codigo no caminho sem /p/ ou /up/ nao e vitrine", false, ehPaginaDeCompra("https://www.mercadolivre.com.br/anuncios/MLB1234567890/modificar"));
 
 console.log("");
 console.log("=== calcular (#35 - painel sem NaN) ===");
@@ -356,6 +390,9 @@ testar("so vendas: receita calcula", 19900, semVisitas.receita);
 const zeroVendas = calcular({ visitas: 500, vendas: 0 }, null);
 testar("0 vendas: conversao e 0%", 0, zeroVendas.conversao);
 testar("0 vendas: vende-a-cada e null", null, zeroVendas.visitasPorVenda);
+// #39: sem nenhuma visita nao ha taxa - nunca "NaN%" nem "Infinity%".
+testar("0 visitas e 0 vendas: conversao null (nao NaN)", null, calcular({ visitas: 0, vendas: 0 }, 10).conversao);
+testar("0 visitas e 3 vendas: conversao null (nao Infinity)", null, calcular({ visitas: 0, vendas: 3 }, 10).conversao);
 // Nenhum dado: tudo null.
 const vazio = calcular({}, null);
 testar("sem dados: tudo null", null, vazio.visitas);
@@ -376,7 +413,8 @@ function textoDa(conteudo) {
 
 /**
  * Casa um seletor SIMPLES contra um no do stub. Entende apenas o subconjunto
- * que o coletor usa: "tag1, tag2, tag3", "#id" e 'tag[attr*="trecho"]'.
+ * que o coletor usa: "tag1, tag2, tag3", "#id", "[attr]" e
+ * 'tag[attr*="trecho"]'.
  * Divergir daqui para um seletor novo e erro de teste: o coletor nao deve
  * crescer mais que este vocabulario sem o stub crescer junto.
  */
@@ -386,6 +424,12 @@ function casarSeletor(el, seletor) {
     if (item === "*") return true;
     if (item.charAt(0) === "#") {
       return el.attrs && el.attrs.id === item.slice(1);
+    }
+    // "[attr]" ou "tag[attr]": so a PRESENCA do atributo (ex.: [hidden]).
+    const presenca = /^([a-z]*)\[([a-z-]+)\]$/.exec(item);
+    if (presenca) {
+      if (presenca[1] && el.tag !== presenca[1]) return false;
+      return Boolean(el.attrs) && el.attrs[presenca[2]] !== undefined;
     }
     const br = /\[([a-z]+)\*=(.+)\]$/.exec(item);
     let tag = item;
@@ -473,8 +517,8 @@ function documentoDa(body) {
 // Tela de vendedor: dois cards, cada um com o proprio link e as duas
 // metricas. Da mesma estrutura que as fixtures de "Minhas publicacoes".
 const cardA = elementoDa("section", {}, [
-  elementoDa("a", { href: "https://www.mercadolivre.com.br/itm/MLB-3456789012-omni/MLB3456789012" }, [
-    textoDa("Omnibox caixa")
+  elementoDa("a", { href: "https://www.mercadolivre.com.br/itm/MLB-3456789012-caixa/MLB3456789012" }, [
+    textoDa("Caixa organizadora")
   ]),
   elementoDa("span", {}, [textoDa("359 visitas totais")]),
   elementoDa("span", {}, [textoDa("50 vendas")])
@@ -500,8 +544,8 @@ testar("vendedor: visitas do MLB9876543210", 1234, rVendedor["MLB9876543210"].vi
 // cenario real de /up/ que gerou o bug: antes da trava, o "+1.000 vendidos"
 // de outro produto virava metrica deste card. Agora nada deve passar.
 const cardPublico = elementoDa("section", {}, [
-  elementoDa("a", { href: "https://www.mercadolivre.com.br/kit-2-omni/up/MLBU5098517614" }, [
-    textoDa("Kit 2 Omnibox")
+  elementoDa("a", { href: "https://www.mercadolivre.com.br/kit-2-caixa/up/MLBU0000000001" }, [
+    textoDa("Kit 2 Caixa")
   ]),
   elementoDa("span", {}, [textoDa("Novo | 1 vendido")])
 ]);
@@ -509,7 +553,7 @@ const corpoPublico = elementoDa("body", {}, [cardPublico]);
 
 const rPublico = varrerPagina(
   documentoDa(corpoPublico),
-  "https://www.mercadolivre.com.br/kit-2-omni/up/MLBU5098517614"
+  "https://www.mercadolivre.com.br/kit-2-caixa/up/MLBU0000000001"
 );
 testar("publica: gate nao deixa nada passar", 0, Object.keys(rPublico).length);
 testar("publica: paginaMencionaVisita false", false, paginaMencionaVisita(documentoDa(corpoPublico)));
@@ -520,7 +564,7 @@ testar("publica: paginaMencionaVisita false", false, paginaMencionaVisita(docume
 const corpoPainelPublico = elementoDa("body", {}, [
   elementoDa("div", { id: "mlmetrics-painel" }, [textoDa("Visitas totais 9.999")]),
   elementoDa("section", {}, [
-    elementoDa("a", { href: "https://www.mercadolivre.com.br/kit/up/MLBU5098517614" }, [
+    elementoDa("a", { href: "https://www.mercadolivre.com.br/kit/up/MLBU0000000001" }, [
       textoDa("Kit")
     ]),
     elementoDa("span", {}, [textoDa("1 vendido")])
@@ -528,7 +572,7 @@ const corpoPainelPublico = elementoDa("body", {}, [
 ]);
 const rPainel = varrerPagina(
   documentoDa(corpoPainelPublico),
-  "https://www.mercadolivre.com.br/kit/up/MLBU5098517614"
+  "https://www.mercadolivre.com.br/kit/up/MLBU0000000001"
 );
 testar("painel nao vira tela de vendedor", 0, Object.keys(rPainel).length);
 
@@ -543,8 +587,8 @@ const corpoBannerVendido = elementoDa("body", {}, [
     textoDa("Receba produtos mais visitados na sua caixa de entrada")
   ]),
   elementoDa("section", {}, [
-    elementoDa("a", { href: "https://www.mercadolivre.com.br/kit-2-omni/up/MLBU5098517614" }, [
-      textoDa("Kit 2 Omnibox")
+    elementoDa("a", { href: "https://www.mercadolivre.com.br/kit-2-caixa/up/MLBU0000000001" }, [
+      textoDa("Kit 2 Caixa")
     ]),
     elementoDa("span", {}, [textoDa("+1.000 vendidos")])
   ])
@@ -573,6 +617,43 @@ const rPainelVendedor = varrerPagina(
 );
 testar("painel ignorado, visitas reais valem", 359, rPainelVendedor["MLB1111111111"].visitas);
 testar("painel ignorado, vendas reais valem", 50, rPainelVendedor["MLB1111111111"].vendas);
+
+// #52: texto de <noscript> e de elemento [hidden] nao aparece na tela - nao
+// pode virar metrica, nem vencer o valor visivel pela regra do maior valor,
+// nem credenciar pagina publica como tela de vendedor.
+const corpoOculto = elementoDa("body", {}, [
+  elementoDa("noscript", {}, [textoDa("9.999 visitas")]),
+  elementoDa("section", {}, [
+    elementoDa("a", { href: "https://www.mercadolivre.com.br/itm/MLB-3456789012-caixa/MLB3456789012" }, [
+      textoDa("Caixa organizadora")
+    ]),
+    elementoDa("div", { hidden: "" }, [textoDa("777 visitas totais")]),
+    elementoDa("span", {}, [textoDa("359 visitas totais")])
+  ])
+]);
+const rOculto = varrerPagina(
+  documentoDa(corpoOculto),
+  "https://www.mercadolivre.com.br/herramientas/publicaciones"
+);
+testar("oculto: noscript e [hidden] nao vencem o valor visivel", 359, rOculto["MLB3456789012"].visitas);
+
+const corpoNoscriptPublico = elementoDa("body", {}, [
+  elementoDa("noscript", {}, [textoDa("Ative o JavaScript para ver as visitas")]),
+  elementoDa("section", {}, [
+    elementoDa("a", { href: "https://www.mercadolivre.com.br/kit/up/MLBU0000000001" }, [
+      textoDa("Kit")
+    ]),
+    elementoDa("span", {}, [textoDa("1 vendido")])
+  ])
+]);
+testar("oculto: noscript nao credencia pagina publica", false, paginaMencionaVisita(documentoDa(corpoNoscriptPublico)));
+
+console.log("");
+console.log("=== caminhoMascarado (#44/#50 - diagnostico sem dado pessoal) ===");
+testar("rota de sistema fica igual", "/anuncios/lista", caminhoMascarado("/anuncios/lista"));
+testar("digitos viram #", "/vendas/#/detalhe", caminhoMascarado("/vendas/12345678/detalhe"));
+testar("titulo de produto some, tipo de codigo fica", "/(titulo)/up/MLBU#", caminhoMascarado("/kit-2-caixa-organizadora-modular/up/MLBU0000000001"));
+testar("rota de ate 3 palavras fica", "/publicaciones-y-ventas", caminhoMascarado("/publicaciones-y-ventas"));
 
 console.log("");
 if (limitacoes.length > 0) {

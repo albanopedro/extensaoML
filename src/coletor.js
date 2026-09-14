@@ -56,18 +56,19 @@
   // Duas horas equilibra dado fresco com nao pesar na navegacao dela.
   const INTERVALO_BUSCA_MS = 2 * 60 * 60 * 1000;
 
-  // Ultima vez em que um diagnostico foi gravado (trava do salvarDiagnostico).
-  let ultimoDiagnostico = 0;
+  // Ultimo diagnostico gravado: de qual tela e quando (trava do
+  // salvarDiagnostico, que e por tela - ver la).
+  let ultimoDiagnostico = { caminho: null, quando: 0 };
 
   // Identificadores de anuncio do Mercado Livre.
   //
   // A letra opcional depois de "MLB" faz parte do codigo, nao e ruido:
-  // "MLBU5098517614" e "MLB5098517614" sao identificadores diferentes.
+  // "MLBU1234567890" e "MLB1234567890" sao identificadores diferentes.
   // Capturamos prefixo e digitos separados e remontamos sem o hifen.
   //
   //   MLB-3456789012   ->  MLB3456789012    anuncio
   //   MLB12345678      ->  MLB12345678      produto de catalogo (/p/)
-  //   MLBU5098517614   ->  MLBU5098517614   estrutura nova (/up/)
+  //   MLBU1234567890   ->  MLBU1234567890   estrutura nova (/up/)
   const PADRAO_CODIGO = /(MLB[A-Z]?)-?(\d{6,})/;
 
   // --------------------------------------------------------------------------
@@ -188,6 +189,10 @@
 
     if (temLetra(vao)) return null;
 
+    // Percentual nao e contagem: em "+12% visitas" o 12 e variacao, nao
+    // quantidade de visitas. O "%" nao e letra, entao temLetra deixa passar.
+    if (/^\s*%/.test(vao)) return null;
+
     // O ultimo numero e uma data brasileira? "Publicado em 01.02.2023
     // visitas" nao tem valor nenhum - rejeitamos o trecho inteiro.
     if (ehData(ultimo[0])) return null;
@@ -216,6 +221,13 @@
     // pela leitura normal - rejeitamos o trecho inteiro.
     const depoisDoNumero = trecho.slice(encontrado.index + encontrado[0].length);
     if (ehData(encontrado[0] + depoisDoNumero)) return null;
+
+    // O que vem DEPOIS do numero tambem decide. "Visitas +12%" e variacao,
+    // "Ultima visita 14/09" e data sem ano, "Vendas (30 dias) 12" e o periodo
+    // do recorte - em nenhum deles o numero e o valor do rotulo. Sem esta
+    // checagem, a regra do "maior valor" em varrerPagina deixaria o 30 ou o
+    // 16% vencerem a contagem real do mesmo card.
+    if (seguidoDeUnidade(depoisDoNumero)) return null;
 
     return paraInteiro(encontrado[0]);
   }
@@ -253,6 +265,33 @@
     const mes = parseInt(m[2], 10);
 
     return mes >= 1 && mes <= 12 && dia >= 1 && dia <= 31;
+  }
+
+  /**
+   * Diz se o texto logo depois de um numero o transforma em outra coisa que
+   * nao uma contagem: percentual, data sem ano, hora, periodo ou milhar
+   * abreviado.
+   *
+   *   "12%"       -> percentual (variacao, taxa)
+   *   "14/09"     -> data sem ano        "14:32" -> hora
+   *   "30 dias"   -> periodo do recorte
+   *   "12 mil"    -> abreviacao: o valor real e 12.000, nao 12
+   *
+   * A lista e FECHADA de proposito. Rejeitar qualquer palavra depois do
+   * numero quebraria "Visitas 359 Vendas 12", em que o que vem depois e so o
+   * proximo rotulo. So bloqueamos o que sabemos que muda o sentido.
+   *
+   * @param {string} resto texto que vem imediatamente depois do numero
+   * @returns {boolean}
+   */
+  function seguidoDeUnidade(resto) {
+    // Percentual, ou barra/dois-pontos colados em outro digito (data e hora).
+    if (/^\s*%/.test(resto) || /^[\/:]\d/.test(resto)) return true;
+
+    // Palavra de tempo, mes abreviado ou milhar. O (?!...) do fim exige que a
+    // palavra termine ali: "d" nao casa com "de", "h" com "hoje", "min" com
+    // "minhas" - so a unidade sozinha conta.
+    return /^\s*(dias?|d|h|horas?|min|minutos?|semanas?|m[eê]s|meses|anos?|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez|mil|mi|k)(?![a-zA-ZÀ-ÖØ-öø-ÿ])/i.test(resto);
   }
 
   /**
@@ -439,8 +478,14 @@
     // Sem pai, nao temos como saber o contexto - aceitamos por seguranca.
     if (!pai) return NodeFilter.FILTER_ACCEPT;
 
-    // Rejeita nos dentro de script, style e template.
-    if (pai.closest("script, style, template")) {
+    // Rejeita nos dentro de script, style e template, e tambem de:
+    //  - noscript: com o JavaScript ligado, o conteudo dele e texto cru que
+    //    nunca aparece na tela;
+    //  - [hidden]: atributo que tira o elemento da tela por completo.
+    // aria-hidden NAO entra: o ML marca com ele numeros que APARECEM na tela
+    // (a parte visual do preco tem aria-hidden="true"), escondendo so do
+    // leitor de tela. Rejeita-lo apagaria texto visivel.
+    if (pai.closest("script, style, template, noscript, [hidden]")) {
       return NodeFilter.FILTER_REJECT;
     }
 
@@ -877,9 +922,10 @@
    *   - CAMINHO: a estrutura NOVA (/up/MLBU...) e a de catalogo (/p/MLB...)
    *     ficam no host www.mercadolivre.com.br - o MESMO das telas de
    *     vendedor - entao o host sozinho nao basta. Nessas rotas o codigo do
-   *     produto e sempre o ultimo segmento do caminho, marca que nenhuma
-   *     tela de vendedor tem (as de vendedor carregam o codigo em
-   *     parametros, nunca no caminho).
+   *     produto vem logo depois de "/up/" ou "/p/", as vezes seguido de mais
+   *     um segmento: "/p/MLB.../s" e a lista de vendedores do catalogo,
+   *     cheia de "+N vendas" de reputacao. Nenhuma tela de vendedor usa
+   *     essas rotas.
    *
    * Comparar texto nao e confiavel - as palavras dos botoes mudam e, pior,
    * qualquer ocorrencia delas num <script> ou template oculto desligaria o
@@ -897,10 +943,11 @@
 
     return host.indexOf("produto.mercadolivre") !== -1 ||
            host.indexOf("articulo.mercadolivre") !== -1 ||
-           // "/up/MLBU5098517614" (layout novo) e "/p/MLB12345678" (catalogo):
-           // o MLB como ultimo segmento do caminho = vitrine publica.
-           /\/up\/MLB[A-Z]?\d{6,}\/?$/.test(path) ||
-           /\/p\/MLB\d{6,}\/?$/.test(path);
+           // "/up/MLBU1234567890" (layout novo) e "/p/MLB12345678" (catalogo),
+           // no fim do caminho ou seguidos de outro segmento ("/p/MLB.../s").
+           // O (\/|$) exige que o codigo termine ali: numa barra ou no fim.
+           /\/up\/MLB[A-Z]?\d{6,}(\/|$)/.test(path) ||
+           /\/p\/MLB\d{6,}(\/|$)/.test(path);
   }
 
   /**
@@ -1105,20 +1152,65 @@
    * clipboard no popup.
    */
   function salvarDiagnostico() {
-    // Trava de frequencia em memoria (este script). Numa pagina do ML com
-    // DOM inquieto (carrossel, lazy load), uma varredura sem captura acontece
-    // a cada 600ms; sem esta trava, o diagnostico seria regravado a cada uma
-    // delas, enchendo o storage sem nunca ser lido por ninguem.
+    // Trava de frequencia POR TELA. Numa pagina do ML com DOM inquieto
+    // (carrossel, lazy load), uma varredura sem captura acontece a cada 600ms;
+    // sem trava, o diagnostico seria regravado a cada uma delas.
+    //
+    // Mas a trava nao pode ser so de tempo: a central de vendedor navega sem
+    // recarregar a pagina (SPA), e uma trava de 3 minutos iniciada na tela
+    // anterior impedia justamente a tela que interessa de gravar. Tela nova
+    // grava na hora; a mesma tela, so depois do intervalo.
     const INTERVALO_DIAGNOSTICO_MS = 3 * 60 * 1000;
     const agora = Date.now();
-    if (agora - ultimoDiagnostico < INTERVALO_DIAGNOSTICO_MS) return;
-    ultimoDiagnostico = agora;
+    const caminho = caminhoMascarado(window.location.pathname);
 
+    if (caminho === ultimoDiagnostico.caminho &&
+        agora - ultimoDiagnostico.quando < INTERVALO_DIAGNOSTICO_MS) {
+      return;
+    }
+
+    // Marcamos antes de varrer, e nao so quando ha amostra: pagina sem
+    // nenhuma palavra-chave tambem precisa da trava, senao seria varrida
+    // inteira a cada 600ms so para descobrir que nao tem nada.
+    ultimoDiagnostico = { caminho: caminho, quando: agora };
+
+    const amostras = coletarAmostras(document);
+    if (amostras.length === 0) return;
+
+    try {
+      chrome.storage.local.set({
+        [CHAVE_DIAGNOSTICO]: {
+          // Host e a FORMA do caminho (ver caminhoMascarado). A query nunca
+          // entra - pode carregar identificador de sessao - e o caminho cru
+          // pode carregar codigo de produto, id de vendedor e titulo. Mascarado,
+          // ele diz de QUAL TELA veio o diagnostico (so o host valia para o
+          // site inteiro) sem levar nada disso para o clipboard.
+          host: window.location.hostname,
+          caminho: caminho,
+          quando: agora,
+          amostras: amostras
+        }
+      });
+    } catch (e) {
+      // Contexto invalidado: diagnostico nao e essencial, proximo ciclo tenta.
+    }
+  }
+
+  /**
+   * Junta as amostras de texto que PARECEM metrica, com a janela em volta.
+   *
+   * Separada de salvarDiagnostico porque o diagnostico pedido pelo popup
+   * (diagnosticarTelaAtual) faz a mesma coleta sem gravar nada.
+   *
+   * @param {Document} doc
+   * @returns {Array} ate 25 itens { texto, contexto }
+   */
+  function coletarAmostras(doc) {
     const amostras = [];
     // Mesmo filtro de varrerPagina: o texto de <script>/<style> do ML embute
     // JSONs com palavras-chave, que sujariam o diagnostico com lixo.
-    const caminhante = document.createTreeWalker(
-      document.body,
+    const caminhante = doc.createTreeWalker(
+      doc.body,
       NodeFilter.SHOW_TEXT,
       aceitarNoDeTextoTecnico
     );
@@ -1130,6 +1222,13 @@
     while (no && amostras.length < 25) {
       const texto = (no.nodeValue || "").trim();
       const minusculo = texto.toLowerCase();
+      const elemento = no.parentElement;
+
+      // O proprio painel ("Visitas totais", "Vendas") nao e texto do ML. Sem
+      // esta guarda, o diagnostico de uma pagina de anuncio viria cheio da
+      // saida da extensao em vez do que o site mostra.
+      const daExtensao = Boolean(elemento &&
+        elemento.closest("#mlmetrics-painel, #mlmetrics-aviso"));
 
       const pareceMetrica = Object.keys(ROTULOS).some(function (metrica) {
         return ROTULOS[metrica].some(function (palavra) {
@@ -1139,7 +1238,7 @@
 
       // O limite de tamanho descarta paragrafos: se o texto e longo, e
       // prosa mencionando a palavra, nao um rotulo de metrica.
-      if (pareceMetrica && texto.length > 0 && texto.length < 120) {
+      if (!daExtensao && pareceMetrica && texto.length > 0 && texto.length < 120) {
         amostras.push({
           texto: texto,
           // Janela em volta do rotulo, nao o pai inteiro. Pegar o pai todo
@@ -1155,24 +1254,108 @@
       no = caminhante.nextNode();
     }
 
-    if (amostras.length === 0) return;
+    return amostras;
+  }
 
+  /**
+   * Caminho da URL com o que pode identificar alguem trocado por marcas.
+   *
+   * O diagnostico precisa dizer EM QUAL TELA a leitura aconteceu - so o host
+   * ("www.mercadolivre.com.br") vale para o site inteiro e nao separa a
+   * homepage de "Minhas publicacoes". Mas o caminho completo pode carregar
+   * codigo de anuncio, id de vendedor e o titulo do produto. Guardamos a
+   * FORMA da rota, sem esses dados:
+   *
+   *   /anuncios/lista                        -> /anuncios/lista
+   *   /vendas/12345678/detalhe               -> /vendas/#/detalhe
+   *   /kit-2-caixa-organizadora/up/MLBU123   -> /(titulo)/up/MLBU#
+   *
+   * Titulo e reconhecido pelo formato de slug: muitas palavras ligadas por
+   * hifen. Rota de sistema tem no maximo tres ("publicaciones-y-ventas").
+   *
+   * @param {string} caminho pathname da URL
+   * @returns {string}
+   */
+  function caminhoMascarado(caminho) {
+    return caminho.split("/").map(function (trecho) {
+      // Slug de titulo: muitas palavras ligadas por hifen.
+      if (trecho.split("-").length > 3) return "(titulo)";
+
+      // Codigo de anuncio, id de vendedor, numero de pedido: os digitos somem,
+      // a letra do prefixo fica ("MLBU#") - ela diz o TIPO de codigo.
+      return trecho.replace(/\d+/g, "#");
+    }).join("/");
+  }
+
+  /**
+   * Diagnostico da tela ABERTA, montado na hora em que o popup pede.
+   *
+   * O diagnostico guardado no storage e da ultima pagina que falhou - em
+   * qualquer aba, ha qualquer tempo. Quem clica em "Copiar diagnostico" esta
+   * olhando UMA tela e espera que o relatorio fale dela. Por isso o popup
+   * pergunta direto a esta aba, e a resposta mostra cada trava do coletor
+   * aplicada a ela: e vitrine? menciona visita? o que seria capturado agora?
+   *
+   * So leitura: varre a pagina inteira, mas nao grava nada.
+   *
+   * @returns {Object}
+   */
+  function diagnosticarTelaAtual() {
+    const url = window.location.href;
+    const vitrine = ehPaginaDeCompra(url);
+
+    return {
+      host: window.location.hostname,
+      caminho: caminhoMascarado(window.location.pathname),
+      // Trava 1: vitrine publica nunca e varrida pelo coletor.
+      vitrine: vitrine,
+      // Trava 2: pagina sem "visita" fora do painel nao e tela de vendedor.
+      mencionaVisita: paginaMencionaVisita(document),
+      // O que o coletor gravaria se varresse agora ({} = nada passou pelas
+      // travas). Em vitrine ele nem varre, entao fica null.
+      capturariaAgora: vitrine ? null : varrerPagina(document, url),
+      amostras: coletarAmostras(document)
+    };
+  }
+
+  /**
+   * Diz se a extensao ainda esta viva para este script.
+   *
+   * Quando a extensao e recarregada ou atualizada em chrome://extensions, os
+   * scripts que ja estavam nas abas abertas NAO sao trocados pela versao
+   * nova: ficam orfaos, sem acesso ao chrome.storage, e o navegador so
+   * injeta a versao nova quando a pagina e recarregada (F5). O sinal de
+   * orfandade e o chrome.runtime.id sumir.
+   *
+   * @returns {boolean}
+   */
+  function extensaoViva() {
     try {
-      chrome.storage.local.set({
-        [CHAVE_DIAGNOSTICO]: {
-          // So o HOST. A query pode carregar identificadores de sessao, e o
-          // CAMINHO pode carregar codigo de produto ou de vendedor - nenhum
-          // dos dois tem lugar num diagnostico que vai para o clipboard e
-          // para uma conversa. Para entender o formato da tela bastam o
-          // host e os trechos de texto das amostras.
-          url: window.location.hostname,
-          quando: Date.now(),
-          amostras: amostras
-        }
-      });
+      return Boolean(chrome.runtime && chrome.runtime.id);
     } catch (e) {
-      // Contexto invalidado: diagnostico nao e essencial, proximo ciclo tenta.
+      return false;
     }
+  }
+
+  // O popup pede o diagnostico DESTA aba quando a pessoa clica em "Copiar
+  // diagnostico" (ver diagnosticarTelaAtual). A varredura e sincrona, entao
+  // respondemos na hora, sem abrir canal assincrono.
+  try {
+    chrome.runtime.onMessage.addListener(function (mensagem, remetente, responder) {
+      if (!mensagem || mensagem.tipo !== "diagnosticar") return;
+
+      // So a propria extensao pode pedir: outra origem nao dispara varredura.
+      if (remetente.id !== chrome.runtime.id) return;
+
+      if (!document.body) {
+        responder({ erro: "pagina sem body" });
+        return;
+      }
+
+      responder(diagnosticarTelaAtual());
+    });
+  } catch (e) {
+    // Contexto invalidado: o popup relata que a aba nao respondeu.
   }
 
   // Varre uma vez de imediato e liga o observador SO se houver body.
@@ -1226,6 +1409,15 @@
     }
 
     const observador = new MutationObserver(function (mutacoes) {
+      // Extensao recarregada: este script ficou orfao (ver extensaoViva).
+      // Continuar varrendo a cada mutacao so gastaria a CPU da aba sem nunca
+      // conseguir gravar. Desligamos tudo; a versao nova entra no F5.
+      if (!extensaoViva()) {
+        observador.disconnect();
+        clearTimeout(agendado);
+        return;
+      }
+
       // Mudo o DOM da extensao: nao e conteudo do ML, nao vale re-varrer.
       if (mutacoes.some(mutacaoDaExtensao)) return;
 
@@ -1235,7 +1427,11 @@
       // 600ms depois que as mudancas pararem.
       clearTimeout(agendado);
 
-      agendado = setTimeout(coletar, 600);
+      // A conferencia se repete no disparo: a extensao pode ter sido
+      // recarregada durante os 600ms de espera.
+      agendado = setTimeout(function () {
+        if (extensaoViva()) coletar();
+      }, 600);
     });
 
     observador.observe(document.body, {
