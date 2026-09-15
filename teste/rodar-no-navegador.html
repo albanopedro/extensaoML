@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>ML Metrics - teste no navegador</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
+      margin: 24px;
+      color: #222;
+      background: #fff;
+    }
+    h1 { font-size: 18px; margin: 0 0 6px; }
+    #resumo { font-size: 16px; font-weight: 700; margin: 12px 0; }
+    #resumo.ok { color: #0a7a3a; }
+    #resumo.falhou { color: #c0262d; }
+    ol { font-family: Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.6; }
+    .PASS { color: #0a7a3a; }
+    .FAIL { color: #c0262d; font-weight: 700; }
+    iframe { width: 100%; height: 280px; border: 1px solid #ddd; margin-top: 8px; }
+    details { margin-top: 16px; }
+  </style>
+</head>
+<body>
+
+<h1>ML Metrics — teste no navegador</h1>
+<p>
+  Roda o <code>coletor.js</code> e o <code>content.js</code> de verdade sobre as
+  fixtures fictícias, com um <code>chrome</code> falso (storage em memória).
+  Nada sai deste computador.
+</p>
+
+<div id="resumo">Rodando...</div>
+<ol id="resultados"></ol>
+
+<details>
+  <summary>Fixtures usadas no teste</summary>
+  <div id="quadros"></div>
+</details>
+
+<script>
+// ============================================================================
+// TESTE NO NAVEGADOR - complementa o teste/test-parsing.js
+//
+// O harness em Node testa as funcoes puras e o service worker. O que depende
+// de um navegador de verdade fica aqui: TreeWalker e textContent de elementos
+// reais, painel desenhado, botao de fechar, script orfao.
+//
+// Como rodar: node teste/servidor-teste.js e abrir
+// http://127.0.0.1:5178/teste/rodar-no-navegador.html
+// ============================================================================
+
+(function () {
+  "use strict";
+
+  const lista = document.getElementById("resultados");
+  let passou = 0;
+  let falhou = 0;
+
+  function testar(descricao, esperado, obtido) {
+    const ok = esperado === obtido;
+    const item = document.createElement("li");
+
+    item.className = ok ? "PASS" : "FAIL";
+    item.textContent = (ok ? "PASS | " : "FAIL | ") + descricao +
+      (ok ? "" : " -> veio " + JSON.stringify(obtido) + ", esperado " + JSON.stringify(esperado));
+    lista.appendChild(item);
+
+    if (ok) passou++;
+    else falhou++;
+  }
+
+  function esperar(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  function copia(valor) {
+    return valor === undefined ? undefined : JSON.parse(JSON.stringify(valor));
+  }
+
+  /**
+   * chrome falso: storage em memoria com callbacks assincronos, como o de
+   * verdade, e eventos onChanged. Sem sendMessage de proposito: o coletor cai
+   * no plano B de gravar na propria aba (o service worker e testado no Node).
+   */
+  function chromeFalso(armazem) {
+    const ouvintesDoStorage = [];
+
+    const falso = {
+      ouvinteDeMensagem: null,
+      runtime: {
+        id: "teste-local",
+        lastError: undefined,
+        getManifest: function () { return { version: "teste" }; },
+        onMessage: {
+          addListener: function (funcao) { falso.ouvinteDeMensagem = funcao; }
+        }
+      },
+      storage: {
+        local: {
+          get: function (chaves, callback) {
+            const nomes = chaves === null ? Object.keys(armazem) : [].concat(chaves);
+            const resposta = {};
+
+            nomes.forEach(function (nome) {
+              if (armazem[nome] !== undefined) resposta[nome] = copia(armazem[nome]);
+            });
+            setTimeout(function () { callback(resposta); }, 0);
+          },
+          set: function (objeto, callback) {
+            const mudancas = {};
+
+            Object.keys(objeto).forEach(function (nome) {
+              mudancas[nome] = { oldValue: copia(armazem[nome]), newValue: copia(objeto[nome]) };
+              armazem[nome] = copia(objeto[nome]);
+            });
+            setTimeout(function () {
+              ouvintesDoStorage.forEach(function (ouvinte) { ouvinte(mudancas, "local"); });
+              if (callback) callback();
+            }, 0);
+          }
+        },
+        onChanged: {
+          addListener: function (funcao) { ouvintesDoStorage.push(funcao); }
+        }
+      }
+    };
+
+    return falso;
+  }
+
+  function carregarScript(documento, caminho) {
+    return new Promise(function (resolve, reject) {
+      const script = documento.createElement("script");
+
+      // Sem cache: o teste sempre roda a versao atual do arquivo.
+      script.src = caminho + "?t=" + Date.now();
+      script.onload = resolve;
+      script.onerror = function () { reject(new Error("nao carregou " + caminho)); };
+      documento.head.appendChild(script);
+    });
+  }
+
+  /**
+   * Abre uma fixture num iframe, instala o chrome falso e carrega os scripts
+   * da extensao na ordem do manifest. "antes" pode mexer na pagina antes de os
+   * scripts rodarem (acrescentar cards de teste, por exemplo).
+   */
+  function abrirFixture(endereco, armazem, scripts, antes) {
+    return new Promise(function (resolve, reject) {
+      const quadro = document.createElement("iframe");
+
+      quadro.onload = function () {
+        const janela = quadro.contentWindow;
+        const falso = chromeFalso(armazem);
+
+        Object.defineProperty(janela, "chrome", { value: falso, writable: true, configurable: true });
+        if (antes) antes(janela.document);
+
+        let cadeia = Promise.resolve();
+        scripts.forEach(function (script) {
+          cadeia = cadeia.then(function () { return carregarScript(janela.document, script); });
+        });
+
+        cadeia.then(function () {
+          resolve({ documento: janela.document, falso: falso });
+        }, reject);
+      };
+
+      quadro.src = endereco;
+      document.getElementById("quadros").appendChild(quadro);
+    });
+  }
+
+  function valorDaLinha(documento, rotulo) {
+    const linhas = documento.querySelectorAll("#mlmetrics-painel .mlmetrics-linha");
+
+    for (let i = 0; i < linhas.length; i++) {
+      if (linhas[i].querySelector(".mlmetrics-rotulo").textContent === rotulo) {
+        // O formato de moeda usa espaco nao separavel; normalizamos.
+        return linhas[i].querySelector(".mlmetrics-valor").textContent.replace(/\s/g, " ");
+      }
+    }
+
+    return null;
+  }
+
+  function tituloDaLinha(documento, rotulo) {
+    const linhas = documento.querySelectorAll("#mlmetrics-painel .mlmetrics-linha");
+
+    for (let i = 0; i < linhas.length; i++) {
+      if (linhas[i].querySelector(".mlmetrics-rotulo").textContent === rotulo) {
+        return linhas[i].title;
+      }
+    }
+
+    return "";
+  }
+
+  function campo(cache, codigo, metrica) {
+    return cache[codigo] ? cache[codigo][metrica] : "sem registro";
+  }
+
+  function registroComOrigem(visitas, vendas) {
+    const agora = Date.now();
+    const registro = { capturadoEm: agora, origem: {} };
+
+    if (visitas !== undefined) {
+      registro.visitas = visitas;
+      registro.origem.visitas = { trecho: "«" + visitas + " visitas»", tela: "/anuncios/lista", em: agora };
+    }
+    if (vendas !== undefined) {
+      registro.vendas = vendas;
+      registro.origem.vendas = { trecho: "«" + vendas + " vendas»", tela: "/anuncios/lista", em: agora };
+    }
+
+    return registro;
+  }
+
+  // Cards acrescentados a fixture de "Minhas publicacoes", com codigos
+  // ficticios, para os formatos que o gabarito original nao cobre.
+  const CARDS_EXTRAS =
+    // Numeros ANTES dos rotulos, em elementos irmaos (o caso da cliente).
+    '<div class="card"><h2><a href="https://www.mercadolivre.com.br/anuncio/MLB-7777777777-irmaos">Irmaos</a></h2>' +
+    '<div><span>359</span><span>visitas</span><span>12</span><span>vendas</span>' +
+    '<span>5</span><span>disponíveis</span></div></div>' +
+    // Leitura ambigua: nao pode virar numero.
+    '<div class="card"><h2><a href="https://www.mercadolivre.com.br/anuncio/MLB-8888888888-ambiguo">Ambiguo</a></h2>' +
+    '<span>80 visitas</span> <span>Estoque: 5 | Vendas</span></div>' +
+    // Link do ITEM e link do CATALOGO no mesmo card (#38).
+    '<div class="card"><h2><a href="https://www.mercadolivre.com.br/anuncio/MLB-9999999999-item">Item</a></h2>' +
+    '<a href="https://www.mercadolivre.com.br/produto/p/MLB12345678">Ver no catalogo</a> ' +
+    '<span>42 visitas</span> <span>3 vendas</span></div>';
+
+  // Filtro de periodo em controles de verdade (#47): lista, radio, botao
+  // pressionado e campo de datas. Nenhum tem "visita" nem "venda", entao as
+  // capturas acima nao podem mudar; so o diagnostico le isto.
+  const FILTRO_DE_PERIODO =
+    '<div class="filtros">' +
+    '<select><option>Últimos 7 dias</option><option selected>Últimos 30 dias</option></select> ' +
+    '<label><input type="radio" name="periodo"> Hoje</label> ' +
+    '<label><input type="radio" name="periodo" checked> Últimos 90 dias</label> ' +
+    '<button type="button" aria-pressed="true">Este mês</button> ' +
+    '<input type="text" value="01/08/2026 - 30/08/2026">' +
+    '</div>';
+
+  async function rodar() {
+    // --- 1. Coletor sobre "Minhas publicacoes" ------------------------------
+    const armazem1 = {};
+    const tela = await abrirFixture(
+      "/teste/publicacoes.html",
+      armazem1,
+      ["/src/gravacao.js", "/src/coletor.js"],
+      function (documento) {
+        documento.body.insertAdjacentHTML("afterbegin", FILTRO_DE_PERIODO);
+        documento.body.insertAdjacentHTML("beforeend", CARDS_EXTRAS);
+      }
+    );
+    await esperar(700);
+
+    const cache = armazem1.mlmetrics_dados || {};
+
+    testar("publicacoes: MLB1111111111 visitas 359", 359, campo(cache, "MLB1111111111", "visitas"));
+    testar("publicacoes: MLB1111111111 vendas 50", 50, campo(cache, "MLB1111111111", "vendas"));
+    testar("publicacoes: MLB2222222222 visitas 1234", 1234, campo(cache, "MLB2222222222", "visitas"));
+    testar("publicacoes: MLB3333333333 visitas 87", 87, campo(cache, "MLB3333333333", "visitas"));
+    testar("publicacoes: MLB5555555555 fica com o maior recorte (4200)", 4200, campo(cache, "MLB5555555555", "visitas"));
+    testar("publicacoes: caso 4 (sem metrica) nao entra", "sem registro", campo(cache, "MLB4444444444", "visitas"));
+    testar("publicacoes: caso 6 (prosa) nao entra", "sem registro", campo(cache, "MLB6666666666", "visitas"));
+    testar("publicacoes: rastro de origem gravado", true,
+      Boolean(cache.MLB1111111111 && /359 visitas/.test(cache.MLB1111111111.origem.visitas.trecho)));
+    testar("irmaos (numero antes do rotulo): vendas 12, nao 5", 12, campo(cache, "MLB7777777777", "vendas"));
+    testar("irmaos: visitas 359", 359, campo(cache, "MLB7777777777", "visitas"));
+    testar("ambiguo: visitas 80 continuam", 80, campo(cache, "MLB8888888888", "visitas"));
+    testar("ambiguo: vendas nao viram numero", undefined, campo(cache, "MLB8888888888", "vendas"));
+    testar("#38: card com item + catalogo grava no item (visitas)", 42, campo(cache, "MLB9999999999", "visitas"));
+    testar("#38: card com item + catalogo grava no item (vendas)", 3, campo(cache, "MLB9999999999", "vendas"));
+    testar("#38: nada gravado no codigo do catalogo", "sem registro", campo(cache, "MLB12345678", "visitas"));
+
+    let diagnostico = null;
+    tela.falso.ouvinteDeMensagem({ tipo: "diagnosticar" }, { id: "teste-local" }, function (resposta) {
+      diagnostico = resposta;
+    });
+
+    testar("diagnostico: responde a aba", true, Boolean(diagnostico && diagnostico.resumoDasRecusas));
+    testar("diagnostico: diz por que as vendas do ambiguo foram recusadas", true,
+      Boolean(diagnostico) && diagnostico.recusas.some(function (recusa) {
+        return recusa.codigo === "MLB8888888888" && /ambiguo/.test(recusa.motivo);
+      }));
+
+    const periodo = (diagnostico && diagnostico.periodo) || [];
+    function achouPeriodo(onde, texto, marcado) {
+      return periodo.some(function (item) {
+        return item.onde === onde && item.texto === texto && item.marcado === marcado;
+      });
+    }
+
+    testar("#47: diagnostico traz o periodo escrito junto do rotulo", true,
+      achouPeriodo("texto", "Visitas nos ultimos 30 dias", undefined));
+    testar("#47: opcao escolhida na lista vem marcada", true,
+      achouPeriodo("opcao de lista", "Últimos 30 dias", true));
+    testar("#47: opcao nao escolhida vem desmarcada", true,
+      achouPeriodo("opcao de lista", "Últimos 7 dias", false));
+    testar("#47: radio marcado e desmarcado", true,
+      achouPeriodo("texto", "Últimos 90 dias", true) && achouPeriodo("texto", "Hoje", false));
+    testar("#47: botao pressionado vem marcado", true,
+      achouPeriodo("texto", "Este mês", true));
+    testar("#47: intervalo no valor do campo de datas", true,
+      achouPeriodo("campo", "01/08/2026 - 30/08/2026", undefined));
+
+    // --- 2. Painel no anuncio, com preco estruturado -------------------------
+    const armazem2 = { mlmetrics_dados: { MLB1111111111: registroComOrigem(359, 50) } };
+    const anuncio = await abrirFixture(
+      "/teste/MLB-1111111111-anuncio.html",
+      armazem2,
+      ["/src/gravacao.js", "/src/coletor.js", "/src/content.js"]
+    );
+    await esperar(700);
+
+    testar("painel: visitas", "359", valorDaLinha(anuncio.documento, "Visitas"));
+    testar("painel: vendas", "50", valorDaLinha(anuncio.documento, "Vendas"));
+    testar("painel: conversao com virgula", "13,9%", valorDaLinha(anuncio.documento, "Conversão"));
+    testar("painel: vende a cada", "7 visitas", valorDaLinha(anuncio.documento, "Vende a cada"));
+    testar("painel: receita estimada", "R$ 15.995,00", valorDaLinha(anuncio.documento, "Receita estimada"));
+    testar("painel: passar o mouse mostra a origem", true, /359 visitas/.test(tituloDaLinha(anuncio.documento, "Visitas")));
+    testar("coletor nao captura na pagina do anuncio", "MLB1111111111",
+      Object.keys(armazem2.mlmetrics_dados).join(","));
+
+    anuncio.documento.querySelector("#mlmetrics-painel .mlmetrics-fechar").click();
+    const mudado = copia(armazem2.mlmetrics_dados);
+    mudado.MLB1111111111.visitas = 360;
+    mudado.MLB1111111111.origem.visitas.em = Date.now() + 1;
+    anuncio.falso.storage.local.set({ mlmetrics_dados: mudado });
+    await esperar(1200);
+
+    testar("#45: painel fechado nao volta com gravacao nova", null,
+      anuncio.documento.getElementById("mlmetrics-painel"));
+
+    // --- 3. Vendas acima das visitas (#40) -----------------------------------
+    const armazem3 = { mlmetrics_dados: { MLB1111111111: registroComOrigem(5, 12) } };
+    const alerta = await abrirFixture(
+      "/teste/MLB-1111111111-anuncio.html?caso=alerta",
+      armazem3,
+      ["/src/content.js"]
+    );
+    await esperar(700);
+
+    testar("#40: vendas acima das visitas continuam no painel", "12", valorDaLinha(alerta.documento, "Vendas"));
+    testar("#40: conversao fica em branco", "—", valorDaLinha(alerta.documento, "Conversão"));
+    testar("#40: painel mostra o alerta", true,
+      /acima das visitas/.test((alerta.documento.getElementById("mlmetrics-painel") || {}).textContent || ""));
+
+    // --- 4. Anuncio sem dado conferido (#46) ---------------------------------
+    const armazem4 = { mlmetrics_dados: { MLB5555555555: registroComOrigem(10) } };
+    const semDados = await abrirFixture(
+      "/teste/MLB-1111111111-anuncio.html?caso=sem-dados",
+      armazem4,
+      ["/src/content.js"]
+    );
+    await esperar(700);
+
+    testar("#46: anuncio sem dado conferido nao ganha painel", null,
+      semDados.documento.getElementById("mlmetrics-painel"));
+
+    // --- 5. Codigo do item na URL e script orfao -----------------------------
+    const armazem5 = {
+      mlmetrics_dados: {
+        MLB1111111111: registroComOrigem(359),
+        MLB9999999999: registroComOrigem(777)
+      }
+    };
+    const catalogo = await abrirFixture(
+      "/teste/MLB-1111111111-anuncio.html?pdp_filters=item_id:MLB9999999999",
+      armazem5,
+      ["/src/content.js"]
+    );
+    await esperar(700);
+
+    testar("#54: painel usa o item do pdp_filters antes do codigo do caminho", "777",
+      valorDaLinha(catalogo.documento, "Visitas"));
+
+    catalogo.falso.runtime.id = undefined;
+    await esperar(1400);
+
+    testar("#42: extensao recarregada (script orfao) tira o painel", null,
+      catalogo.documento.getElementById("mlmetrics-painel"));
+  }
+
+  function mostrarResumo() {
+    const resumo = document.getElementById("resumo");
+    resumo.textContent = "RESUMO: " + passou + "/" + (passou + falhou) + " ok";
+    resumo.className = falhou === 0 ? "ok" : "falhou";
+
+    // Para leitura automatica (ferramenta de teste ou console).
+    window.resultadoDoTeste = { passou: passou, falhou: falhou };
+  }
+
+  rodar().then(mostrarResumo, function (erro) {
+    testar("erro inesperado ao rodar o teste: " + erro.message, true, false);
+    mostrarResumo();
+  });
+})();
+</script>
+</body>
+</html>

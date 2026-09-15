@@ -27,6 +27,11 @@
   // sem sair varrendo a pagina inteira.
   const MAX_NIVEIS = 12;
 
+  // Maior texto (em caracteres) que a busca pelo valor le num nivel do DOM.
+  // Um card de lista tem centenas de caracteres; acima disso ja e um pedaco
+  // grande da pagina, onde nao ha numero "colado" no rotulo a descobrir.
+  const LIMITE_TEXTO_POR_NIVEL = 5000;
+
   // Metricas que sabemos capturar, e as palavras que as denunciam no texto.
   //
   // Sao varias palavras por metrica porque o ML nao e consistente: a mesma
@@ -52,7 +57,15 @@
   const CHAVE_ORIGENS = "mlmetrics_origens";
   const CHAVE_ULTIMA_BUSCA = "mlmetrics_ultima_busca";
 
-  // De quanto em quanto tempo a extensao vai buscar dados sozinha.
+  // Busca automatica das telas de vendedor (ver atualizarEmSegundoPlano):
+  // DESLIGADA. As telas de vendedor do ML sao montadas por JavaScript, e o
+  // HTML buscado pelo service worker muito provavelmente chega sem os
+  // numeros - a busca usaria a sessao da vendedora a cada 2 horas sem trazer
+  // nada. Religar so depois que a tela real mostrar que o HTML traz os
+  // numeros: basta trocar para true.
+  const BUSCA_AUTOMATICA_LIGADA = false;
+
+  // De quanto em quanto tempo a busca automatica roda, quando ligada.
   // Duas horas equilibra dado fresco com nao pesar na navegacao dela.
   const INTERVALO_BUSCA_MS = 2 * 60 * 60 * 1000;
 
@@ -488,27 +501,42 @@
   /**
    * Lista os codigos de anuncio distintos que aparecem dentro de um elemento.
    *
+   * Um card de "Minhas publicacoes" pode ter link do ITEM e tambem link do
+   * produto de CATALOGO (/p/MLB...) ou do user product (/up/MLBU...) do mesmo
+   * anuncio. Contados juntos, dariam dois codigos - e o card seria ignorado
+   * por ambiguidade (#38). Por isso separamos pelo ENDERECO do link: havendo
+   * exatamente UM item, os links de catalogo/user product em volta sao do
+   * mesmo anuncio, e o codigo e o do item - que e tambem o que o painel procura
+   * primeiro (ver codigosDaPagina no content.js). Dois itens diferentes
+   * continuam sendo ambiguidade.
+   *
    * @param {Element} elemento
    * @returns {string[]}
    */
   function codigosDentroDe(elemento) {
     const links = elemento.querySelectorAll('a[href*="MLB"]');
-    const encontrados = [];
+    const itens = [];
+    const agrupadores = [];
 
     for (let i = 0; i < links.length; i++) {
-      const achado = links[i].getAttribute("href").match(PADRAO_CODIGO);
+      const href = links[i].getAttribute("href") || "";
+      const achado = href.match(PADRAO_CODIGO);
       if (!achado) continue;
 
       const codigo = achado[1] + achado[2];
 
+      // Catalogo (/p/) e user product (/up/) agrupam anuncios; o resto e o
+      // proprio anuncio.
+      const lista = /\/(p|up)\/MLB/.test(href) ? agrupadores : itens;
+
       // O mesmo anuncio costuma ter varios links no card (a foto, o titulo,
       // o botao). Contam como um so - por isso guardamos apenas os distintos.
-      if (encontrados.indexOf(codigo) === -1) {
-        encontrados.push(codigo);
-      }
+      if (lista.indexOf(codigo) === -1) lista.push(codigo);
     }
 
-    return encontrados;
+    // Havendo item, valem so os itens (um so = e dele; dois = ambiguo). Sem
+    // item nenhum, vale o que houver de catalogo/user product, pela mesma regra.
+    return itens.length > 0 ? itens : agrupadores;
   }
 
   /**
@@ -546,6 +574,15 @@
       // quando o atual e o body.
       if (atual !== doc.body) {
         const texto = atual.textContent;
+
+        // Bloco grande demais: paramos de subir. Numero e rotulo colados nunca
+        // precisam de um bloco desse tamanho, e a leitura custa proporcional ao
+        // texto - medido: cerca de 7 ms num bloco de 100 mil caracteres,
+        // repetido para cada rotulo e cada nivel. Numa pagina em que o codigo
+        // vem da URL (o limite e o body), isso podia travar a aba a cada
+        // varredura.
+        if (texto.length > LIMITE_TEXTO_POR_NIVEL) return null;
+
         const leitura = lerRotulo(texto, palavra);
 
         if (leitura !== null) {
@@ -841,59 +878,48 @@
       }
     });
 
-    return descartarImplausiveis(comVisitas, recusas);
+    return anotarImplausiveis(comVisitas, recusas);
   }
 
   /**
-   * Remove leituras que nao podem ser verdade.
+   * Anota as leituras em que as vendas passam das visitas - sem descartar.
    *
-   * Regra: e impossivel vender mais vezes do que o anuncio foi visitado -
-   * toda venda passa por uma visita. Quando isso acontece, o problema nao e
-   * um numero ruim, e a LEITURA INTEIRA que interpretou errado: pegou dois
-   * numeros quaisquer da tela e colou nos rotulos errados. Por isso
-   * descartamos o anuncio todo, nao so a metrica maior.
+   * A regra antiga era "e impossivel vender mais do que visitar", e o anuncio
+   * inteiro era descartado. Nao e impossivel (#40): no ML "vendidos" conta
+   * UNIDADES, e um comprador leva varias numa visita so. Descartar apagava em
+   * silencio justamente o anuncio que vende em quantidade.
    *
-   * Isto e uma rede de protecao contra o risco central desta abordagem.
-   * Como identificamos metricas por palavras no texto, qualquer frase da
-   * pagina que contenha "visitas" ou "vendas" pode ser lida como dado - um
-   * texto de ajuda, uma avaliacao de comprador, um aviso do proprio site.
-   * Nao da para prever todas essas frases, mas da para reconhecer quando o
-   * resultado e impossivel.
+   * Hoje os numeros ficam - cada um com o rastro de onde saiu, para ser
+   * conferido - e o painel mostra um alerta (content.js). Aqui so registramos
+   * no console e, quando o diagnostico pede, na lista de recusas como AVISO.
    *
    * @param {Object} resultado
-   * @param {Array} [recusas] quando passado, recebe os anuncios descartados
-   * @returns {Object} so os anuncios cujos numeros fazem sentido
+   * @param {Array} [recusas] quando passado, recebe um aviso por anuncio
+   * @returns {Object} o proprio resultado, sem tirar nada
    */
-  function descartarImplausiveis(resultado, recusas) {
-    const limpo = {};
-
+  function anotarImplausiveis(resultado, recusas) {
     Object.keys(resultado).forEach(function (codigo) {
       const dados = resultado[codigo];
 
-      // So da para checar quando temos as duas metricas. Com uma so,
-      // aceitamos - nao ha com o que comparar.
+      // So da para comparar quando temos as duas metricas.
       const comparavel = (dados.visitas !== undefined && dados.vendas !== undefined);
+      if (!comparavel || dados.vendas <= dados.visitas) return;
 
-      if (comparavel && dados.vendas > dados.visitas) {
-        console.warn(
-          "[ML METRICS] leitura descartada em " + codigo +
-          ": " + dados.vendas + " vendas para " + dados.visitas + " visitas"
-        );
+      console.warn(
+        "[ML METRICS] vendas acima das visitas em " + codigo +
+        ": " + dados.vendas + " vendas para " + dados.visitas + " visitas"
+      );
 
-        if (recusas) {
-          recusas.push({
-            codigo: codigo,
-            motivo: "vendas maiores que visitas: anuncio inteiro descartado",
-            trecho: dados.vendas + " vendas, " + dados.visitas + " visitas"
-          });
-        }
-        return;
+      if (recusas) {
+        recusas.push({
+          codigo: codigo,
+          motivo: "aviso: vendas acima das visitas (numeros mantidos, o painel mostra alerta)",
+          trecho: dados.vendas + " vendas, " + dados.visitas + " visitas"
+        });
       }
-
-      limpo[codigo] = dados;
     });
 
-    return limpo;
+    return resultado;
   }
 
   // --------------------------------------------------------------------------
@@ -901,249 +927,118 @@
   // --------------------------------------------------------------------------
 
   /**
-   * Diz se os numeros de um anuncio mudaram em relacao ao que ja tinhamos.
+   * Grava o que a varredura achou.
    *
-   * Comparamos apenas as metricas. "capturadoEm" muda toda varredura por
-   * definicao, entao inclui-lo na comparacao faria tudo parecer sempre
-   * diferente - exatamente o que precisamos evitar.
+   * A gravacao de verdade e feita pelo SERVICE WORKER (background.js), que e
+   * um so para todas as abas e grava uma leitura de cada vez. Antes cada aba
+   * lia, mesclava e gravava por conta propria, e duas abas do ML abertas
+   * apagavam o que a outra tinha acabado de gravar (#21). A regra da mesclagem
+   * mora em gravacao.js e e a mesma nos dois lados.
    *
-   * @param {Object|undefined} antigo
-   * @param {Object} novo
-   * @returns {boolean}
-   */
-  function mudou(antigo, novo) {
-    // Nunca vimos este anuncio: e novidade por definicao.
-    if (!antigo) return true;
-
-    // So as METRICAS contam. O rastro de origem muda a cada leitura (hora,
-    // tela) mesmo com o numero igual; compara-lo faria tudo parecer
-    // diferente, e o aviso verde dispararia sem parar.
-    return Object.keys(ROTULOS).some(function (metrica) {
-      // Metrica que esta tela nao mostrou nao conta como mudanca.
-      if (novo[metrica] === undefined) return false;
-      return antigo[metrica] !== novo[metrica];
-    });
-  }
-
-  /**
-   * Diz se o registro guardado tem numero SEM rastro de origem para alguma
-   * metrica que acabou de ser lida de novo.
+   * Se o service worker nao responder (acabou de ser atualizado, falhou ao
+   * acordar), a aba grava sozinha pela mesma regra - perder a leitura seria
+   * pior do que o risco de corrida numa situacao rara.
    *
-   * Acontece com registro gravado por versao antiga da extensao. Numero sem
-   * rastro nao aparece no painel, entao a primeira releitura precisa gravar o
-   * rastro na hora, sem esperar o intervalo de renovacao.
-   *
-   * @param {Object} guardado registro do cache
-   * @param {Object} novo o que esta varredura leu para o mesmo anuncio
-   * @returns {boolean}
-   */
-  function faltaOrigem(guardado, novo) {
-    return Object.keys(ROTULOS).some(function (metrica) {
-      return novo[metrica] !== undefined &&
-             !(guardado.origem && guardado.origem[metrica]);
-    });
-  }
-
-  /**
-   * Junta o rastro de origem guardado com o desta leitura, metrica a metrica,
-   * carimbando a hora e se a leitura veio da busca automatica.
-   *
-   * Por metrica, igual aos numeros: a origem das vendas lidas em outra tela
-   * nao pode sumir so porque esta tela trouxe as visitas.
-   *
-   * @param {Object|undefined} guardada origem que ja estava no cache
-   * @param {Object|undefined} nova origem desta varredura (varrerPagina)
-   * @param {number} agora
-   * @param {boolean} automatica true quando veio da busca em segundo plano
-   * @returns {Object}
-   */
-  function mesclarOrigem(guardada, nova, agora, automatica) {
-    const resultado = Object.assign({}, guardada);
-
-    Object.keys(nova || {}).forEach(function (metrica) {
-      resultado[metrica] = Object.assign({}, nova[metrica], {
-        em: agora,
-        automatica: Boolean(automatica)
-      });
-    });
-
-    return resultado;
-  }
-
-  // Fila que serializa leitura+escrita do cache DESTA aba.
-  //
-  // O chrome.storage nao oferece leitura-modificacao-escrita atomica: entre
-  // o get e o set, outra operacao pode entrar e gravar por cima. Encadear
-  // tudo numa fila unica impede que duas varreduras rapidas da MESMA aba se
-  // pisem - o que acontecia com o aviso verde provocando re-varredura.
-  // Entre abas DISTINTAS a corrida continua: resolver exigiria centralizar
-  // a escrita num service worker (o lote 6 da revisao).
-  let filaDoCache = Promise.resolve();
-
-  /**
-   * Le o cache, permite modificar, e grava de volta - sempre em sequencia.
-   *
-   * Todas as operacoes de chrome.storage ficam protegidas contra erro:
-   * contexto invalidado e quota estourada terminam a fila em silencio, e a
-   * proxima operacao tenta de novo. Nenhuma excecao escapa para o console.
-   *
-   * @param {Function} acao recebe (cache, gravar). gravar(novoCache) persiste,
-   *                        ou gravar(null) para nao escrever nada.
-   */
-  function comCache(acao) {
-    filaDoCache = filaDoCache.then(function () {
-      return new Promise(function (resolve) {
-        let cache;
-
-        try {
-          chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
-            if (chrome.runtime.lastError) {
-              // Contexto invalidado (extensao recarregada) ou acesso negado.
-              resolve();
-              return;
-            }
-
-            cache = guardado[CHAVE_CACHE] || {};
-
-            acao(cache, function (novoCache) {
-              if (novoCache === null || novoCache === undefined) {
-                resolve();  // decisao de nao persistir
-                return;
-              }
-
-              try {
-                chrome.storage.local.set({ [CHAVE_CACHE]: novoCache }, function () {
-                  // Ler o lastError evita o aviso "Unchecked runtime.lastError"
-                  // no console. Quota estourada nao tem o que fazer aqui:
-                  // avisamos, terminamos a fila, e a proxima gravacao tenta.
-                  if (chrome.runtime.lastError) {
-                    console.warn("[ML METRICS] nao consegui gravar o cache");
-                  }
-                  resolve();
-                });
-              } catch (e) {
-                resolve();  // contexto invalidado ao gravar
-              }
-            });
-          });
-        } catch (e) {
-          resolve();  // contexto invalidado ao ler
-        }
-      });
-    }).catch(function () {
-      // A fila nunca para: erro de qualquer operacao deixa a proxima tentar.
-    });
-
-    return filaDoCache;
-  }
-
-  /**
-   * Mescla o que acabamos de achar com o que ja estava guardado.
-   *
-   * Mesclar em vez de sobrescrever e essencial: cada tela mostra um
-   * subconjunto dos anuncios, entao sobrescrever apagaria o que foi
-   * capturado nas telas anteriores.
-   *
-   * @param {Object} novos
-   * @param {boolean} emSegundoPlano true quando a origem e a busca manual
-   *                        automatica (fetch), nao uma tela que a pessoa
-   *                        esta vendo. Nesse caso o aviso verde nao faz
-   *                        sentido: mostraria um toast sobre uma pagina que
-   *                        nao tem relacao com os numeros capturados.
+   * @param {Object} novos o que a varredura leu, por codigo de anuncio
+   * @param {boolean} emSegundoPlano true quando veio da busca automatica, nao
+   *                        de uma tela que a pessoa esta vendo. Nesse caso o
+   *                        aviso verde nao faz sentido: apareceria sobre uma
+   *                        pagina sem relacao com os numeros capturados.
    */
   function salvar(novos, emSegundoPlano) {
     if (Object.keys(novos).length === 0) return;
 
-    const AGORA = Date.now();
-
-    // De quanto em quanto tempo o "capturadoEm" de um anuncio ESTAVEL e
-    // renovado. Reconfirmar a cada varredura gravaria no storage a cada
-    // 600ms sem parar; 2 minutos equilibra frescor com nao pesar em I/O.
-    const INTERVALO_RENOVACAO_MS = 2 * 60 * 1000;
-
-    // Toda a logica de decidir e persistir roda dentro da fila do cache.
-    comCache(function (cache, gravar) {
-      // Ficamos so com os anuncios cujos numeros realmente mudaram.
-      //
-      // Isso e OBRIGATORIO, nao e otimizacao: o MutationObserver la embaixo
-      // dispara a cada alteracao do DOM, e mostrar o aviso verde altera o
-      // DOM. Sem esta trava, avisar provocaria nova varredura, que avisaria
-      // de novo - um loop infinito.
-      const mudancas = Object.keys(novos).filter(function (codigo) {
-        return mudou(cache[codigo], novos[codigo]);
-      });
-
-      // Anuncios ja conhecidos, com numeros IGUAIS ao que a tela mostra.
-      // Nao mudaram, mas foram RECONFIRMADOS agora. Sem esta renovacao, um
-      // anuncio estavel nunca anda a data e o painel passa a gritar "dados
-      // de N dias atras" logo depois de ter sido reconferido - fazendo a
-      // vendedora concluir que a extensao quebrou.
-      const aRenovar = Object.keys(novos).filter(function (codigo) {
-        if (mudancas.indexOf(codigo) !== -1) return false;
-        const anterior = cache[codigo];
-        if (!anterior) return false; // sem registro, foi para mudancas
-
-        // Registro de versao antiga, sem rastro de origem: renova na hora.
-        // Numero sem rastro nao aparece no painel, entao esperar o intervalo
-        // deixaria um numero confirmado agora escondido por ate 2 minutos.
-        if (faltaOrigem(anterior, novos[codigo])) return true;
-
-        return AGORA - (anterior.capturadoEm || 0) >= INTERVALO_RENOVACAO_MS;
-      });
-
-      if (mudancas.length === 0 && aRenovar.length === 0) {
-        gravar(null);  // nada o que persistir
-        return;
-      }
-
-      mudancas.forEach(function (codigo) {
-        // Object.assign copia da esquerda para a direita, entao o que vem
-        // depois vence. A ordem importa e diz a regra de atualizacao:
-        //
-        //   cache[codigo]  -> o que ja sabiamos deste anuncio
-        //   novos[codigo]  -> o que esta tela mostrou agora (mais recente)
-        //
-        // Assim uma tela que so mostra visitas ATUALIZA as visitas sem
-        // apagar as vendas capturadas em outra tela. E entre a captura
-        // velha e a nova vence a NOVA, nao a maior: dentro de uma mesma
-        // pagina o maior valor e o total, mas entre dias diferentes o
-        // numero recente e o correto, mesmo que seja menor.
-        const anterior = cache[codigo] || {};
-
-        cache[codigo] = Object.assign({}, anterior, novos[codigo], {
-          // Data da captura. Permite exibir "dado de 3 dias atras"
-          // em vez de mostrar numero velho como se fosse de agora.
-          capturadoEm: AGORA,
-          // O rastro e mesclado por metrica (ver mesclarOrigem), e nao
-          // substituido inteiro como faria o Object.assign acima.
-          origem: mesclarOrigem(anterior.origem, novos[codigo].origem, AGORA, emSegundoPlano)
-        });
-      });
-
-      // Os numeros continuam os mesmos; andam a data e o rastro, que passa a
-      // apontar para a leitura mais recente que confirmou cada numero.
-      aRenovar.forEach(function (codigo) {
-        cache[codigo].capturadoEm = AGORA;
-        cache[codigo].origem = mesclarOrigem(
-          cache[codigo].origem, novos[codigo].origem, AGORA, emSegundoPlano
-        );
-      });
-
-      gravar(cache);
-
+    function depoisDeGravar(mudancas) {
       // So anunciamos quando algo de fato MUDOU. Reconhecer de novo sem
-      // novidade nao merece toast a cada 2 minutos. E a busca em segundo
-      // plano nunca anuncia: a pessoa nao esta olhando a tela capturada.
-      if (mudancas.length > 0 && !emSegundoPlano) {
+      // novidade nao merece toast a cada 2 minutos - e, sem esta trava, o
+      // aviso mexeria no DOM, o observer varreria de novo e avisaria de novo.
+      if (mudancas > 0 && !emSegundoPlano) {
         console.log(
-          "%c[ML METRICS]%c capturei " + mudancas.length + " anuncio(s):",
+          "%c[ML METRICS]%c capturei " + mudancas + " anuncio(s):",
           "background:#3483fa;color:#fff;padding:2px 6px;border-radius:3px",
           "color:#3483fa",
           novos
         );
 
-        avisarNaTela(mudancas.length);
+        avisarNaTela(mudancas);
       }
+    }
+
+    try {
+      // Sem API de mensagem (pagina de teste fora da extensao): grava aqui.
+      if (typeof chrome.runtime.sendMessage !== "function") {
+        gravarNestaAba(novos, emSegundoPlano, depoisDeGravar);
+        return;
+      }
+
+      chrome.runtime.sendMessage(
+        { tipo: "salvar", novos: novos, automatica: Boolean(emSegundoPlano) },
+        function (resposta) {
+          // lastError aqui e o service worker que nao respondeu: plano B.
+          if (chrome.runtime.lastError || !resposta || !resposta.ok) {
+            gravarNestaAba(novos, emSegundoPlano, depoisDeGravar);
+            return;
+          }
+
+          depoisDeGravar(resposta.mudancas);
+        }
+      );
+    } catch (e) {
+      // Contexto invalidado: a extensao foi recarregada e esta aba ficou
+      // orfa. Nao ha como gravar daqui - a versao nova grava depois do F5.
+    }
+  }
+
+  // Fila do plano B (gravarNestaAba): impede que duas gravacoes da MESMA aba
+  // se pisem. Entre abas quem garante a ordem e o service worker.
+  let filaDoCache = Promise.resolve();
+
+  /**
+   * Plano B: le, mescla e grava o cache daqui mesmo, sem o service worker.
+   *
+   * Todas as operacoes de chrome.storage ficam protegidas contra erro:
+   * contexto invalidado e quota estourada terminam a fila em silencio, e a
+   * proxima gravacao tenta de novo.
+   *
+   * @param {Object} novos
+   * @param {boolean} emSegundoPlano
+   * @param {Function} pronto recebe quantos anuncios mudaram, depois de gravar
+   */
+  function gravarNestaAba(novos, emSegundoPlano, pronto) {
+    filaDoCache = filaDoCache.then(function () {
+      return new Promise(function (resolve) {
+        try {
+          chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
+            if (chrome.runtime.lastError) {
+              resolve();  // contexto invalidado ou acesso negado
+              return;
+            }
+
+            const cache = guardado[CHAVE_CACHE] || {};
+            const resultado = MLMetricsGravacao.mesclar(cache, novos, Date.now(), emSegundoPlano);
+
+            if (resultado.mudancas.length === 0 && resultado.renovados.length === 0) {
+              resolve();  // nada o que persistir
+              return;
+            }
+
+            chrome.storage.local.set({ [CHAVE_CACHE]: cache }, function () {
+              // Ler o lastError evita o aviso "Unchecked runtime.lastError".
+              // Quota estourada nao tem o que fazer aqui: avisamos e seguimos.
+              if (chrome.runtime.lastError) {
+                console.warn("[ML METRICS] nao consegui gravar o cache");
+              } else {
+                pronto(resultado.mudancas.length);
+              }
+              resolve();
+            });
+          });
+        } catch (e) {
+          resolve();  // contexto invalidado
+        }
+      });
+    }).catch(function () {
+      // A fila nunca para: erro de uma gravacao deixa a proxima tentar.
     });
   }
 
@@ -1477,7 +1372,10 @@
           host: window.location.hostname,
           caminho: caminho,
           quando: agora,
-          amostras: amostras
+          amostras: amostras,
+          // O periodo vai junto: sem ele, numero lido nao diz se e total ou
+          // recorte (#47, ver coletarTextosDePeriodo).
+          periodo: coletarTextosDePeriodo(document)
         }
       }, function () {
         // Ler o lastError evita o aviso "Unchecked runtime.lastError".
@@ -1561,6 +1459,183 @@
   }
 
   /**
+   * Junta os textos da tela que dizem DE QUAL PERIODO sao os numeros (#47).
+   *
+   * "359 visitas" pode ser o total do anuncio ou so os ultimos 30 dias,
+   * conforme o filtro que a tela estiver usando. A extensao ainda nao sabe
+   * qual e, e so da para ensinar depois de ver a tela real. So que o filtro
+   * costuma ficar num cabecalho ou numa lista de opcoes LONGE dos rotulos -
+   * fora da janela de 20 + 80 caracteres das amostras. Sem esta coleta, o
+   * primeiro diagnostico da cliente diria "por que nao leu", mas nao "de
+   * quando e o numero", e o #47 pediria mais uma rodada com ela.
+   *
+   * So entra texto CURTO que casa com o vocabulario fechado de periodo
+   * (ehTextoDePeriodo): texto de filtro, sem numero de metrica, nome ou
+   * titulo. Quando o texto esta num controle que diz se esta escolhido
+   * (opcao de lista, radio, aba, botao), vem junto "marcado" - e isso que
+   * separa o periodo em uso das outras opcoes da lista.
+   *
+   * So leitura, para o diagnostico: nao muda o que o coletor grava nem o
+   * que o painel mostra.
+   *
+   * @param {Document} doc
+   * @returns {Array} ate 20 itens { onde, texto, marcado? }
+   */
+  function coletarTextosDePeriodo(doc) {
+    const LIMITE_ITENS = 20;
+    const achados = [];
+    const vistos = {};
+
+    // O mesmo filtro aparece repetido (cabecalho fixo e lista aberta, por
+    // exemplo). Repetido nao acrescenta nada e gastaria vaga.
+    function anotar(onde, texto, marcado) {
+      const chave = onde + "|" + texto + "|" + marcado;
+      if (vistos[chave] || achados.length >= LIMITE_ITENS) return;
+      vistos[chave] = true;
+
+      const item = { onde: onde, texto: texto };
+      // Sem controle que diga, "marcado" fica de fora: false afirmaria que a
+      // opcao NAO esta escolhida, e isso nao sabemos.
+      if (marcado !== undefined) item.marcado = marcado;
+      achados.push(item);
+    }
+
+    // Texto visivel, com o mesmo filtro das amostras: sem script, style ou
+    // oculto, e sem o que a propria extensao desenhou.
+    const caminhante = doc.createTreeWalker(
+      doc.body,
+      NodeFilter.SHOW_TEXT,
+      aceitarNoDeTextoTecnico
+    );
+    let no = caminhante.nextNode();
+
+    while (no && achados.length < LIMITE_ITENS) {
+      const texto = (no.nodeValue || "").replace(/\s+/g, " ").trim();
+      const elemento = no.parentElement;
+      const daExtensao = Boolean(elemento &&
+        elemento.closest("#mlmetrics-painel, #mlmetrics-aviso"));
+
+      // 80 caracteres: rotulo de filtro e curto. Frase longa que menciona
+      // "ultimos 30 dias" e explicacao, nao o filtro.
+      if (!daExtensao && texto.length > 0 && texto.length <= 80 &&
+          ehTextoDePeriodo(texto)) {
+        const opcao = elemento ? elemento.closest("option") : null;
+        anotar(opcao ? "opcao de lista" : "texto", texto, estadoDoControle(elemento));
+      }
+
+      no = caminhante.nextNode();
+    }
+
+    // Seletor de datas costuma mostrar o intervalo no VALOR de um campo, que
+    // nao e no de texto - o TreeWalker nao ve. Campo escondido, de senha,
+    // e-mail ou telefone fica de fora de proposito: pode carregar dado de
+    // conta e nunca e o filtro visivel.
+    const campos = doc.body.querySelectorAll("input");
+
+    for (let i = 0; i < campos.length && achados.length < LIMITE_ITENS; i++) {
+      const campo = campos[i];
+      const tipo = String(campo.type || campo.getAttribute("type") || "").toLowerCase();
+
+      if (/^(hidden|password|email|tel)$/.test(tipo)) continue;
+      if (campo.closest("[hidden], #mlmetrics-painel, #mlmetrics-aviso")) continue;
+
+      const valor = String(campo.value || "").replace(/\s+/g, " ").trim();
+      if (valor.length > 0 && valor.length <= 80 && ehTextoDePeriodo(valor)) {
+        anotar("campo", valor, undefined);
+      }
+    }
+
+    return achados;
+  }
+
+  /**
+   * Diz se um texto curto e rotulo de PERIODO: "Ultimos 30 dias", "Este mes",
+   * "01/08/2026 - 30/08/2026".
+   *
+   * A lista e FECHADA, como em seguidoDeUnidade. Um "dias" solto nao basta:
+   * "Chega em 2 dias" e "pausado ha 12 dias" sao prazo, nao recorte de
+   * metrica, e encheriam o diagnostico. "Hoje" so vale sozinho ou depois de
+   * "de", "desde" e "ate" - "Chega hoje" e entrega. Data sozinha tambem fica
+   * de fora: e data de venda ou de publicacao; so o INTERVALO e filtro.
+   *
+   * @param {string} texto
+   * @returns {boolean}
+   */
+  function ehTextoDePeriodo(texto) {
+    const t = texto.toLowerCase();
+
+    // "Ultimos 30 dias", "ultimas 24 horas", "ultimo mes".
+    if (/[uú]ltim[oa]s?\s+(\d+\s+)?(dias?|semanas?|m[eê]s|meses|anos?|horas)(?![a-zà-ÿ])/.test(t)) {
+      return true;
+    }
+
+    // Opcao solta de lista ou aba: "30 dias", "7d", "24 h".
+    if (/^\d+\s*(dias?|d|semanas?|meses|anos?|horas|h)$/.test(t)) return true;
+
+    // "Hoje", "Ontem", "Vendas desde ontem".
+    if (/^(hoje|ontem)$/.test(t)) return true;
+    if (/(^|\s)(de|desde|at[eé])\s+(hoje|ontem)(?![a-zà-ÿ])/.test(t)) return true;
+
+    // "Este mes", "nesta semana", "Mes passado", "semana anterior", "ano atual".
+    if (/(^|\s)(est[ea]|nest[ea])\s+(semana|m[eê]s|ano)(?![a-zà-ÿ])/.test(t)) return true;
+    if (/(^|\s)(semana|m[eê]s|ano)\s+(atual|passad[oa]|anterior)(?![a-zà-ÿ])/.test(t)) return true;
+
+    // Palavras que so aparecem em filtro de tempo.
+    if (/per[ií]odo|desde (o in[ií]cio|sempre|a publica)|tod[oa] o (per[ií]odo|hist[oó]rico)/.test(t)) {
+      return true;
+    }
+
+    // Intervalo com data curta: "01/08/2026 - 30/08/2026", "01/08 a 30/08".
+    if (/\d{1,2}\/\d{1,2}(\/\d{2,4})?(\s*[-–]\s*|\s+(a|at[eé])\s+)\d{1,2}\/\d{1,2}/.test(t)) {
+      return true;
+    }
+
+    // Intervalo com mes escrito: "16 ago. - 14 set.", "1 de agosto a 30 de agosto".
+    return /\d{1,2}\s+(de\s+)?(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-zç]*\.?(\s+(de\s+)?\d{4})?(\s*[-–]\s*|\s+(a|at[eé])\s+)\d{1,2}\s+(de\s+)?(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)/.test(t);
+  }
+
+  /**
+   * Diz se o controle em volta de um texto esta ESCOLHIDO.
+   *
+   * Uma lista de periodo mostra todas as opcoes ("7 dias", "30 dias", "90
+   * dias"), mas so a escolhida vale para os numeros. Os controles contam isso
+   * de tres jeitos: opcao de <select> (selected), radio ou checkbox de um
+   * <label> (checked) e os atributos aria de botoes e abas. Subimos poucos
+   * niveis porque o texto costuma estar num <span> dentro do botao.
+   *
+   * @param {Element|null} elemento pai do no de texto
+   * @returns {boolean|undefined} undefined quando nenhum controle diz
+   */
+  function estadoDoControle(elemento) {
+    if (!elemento) return undefined;
+
+    const opcao = elemento.closest("option");
+    if (opcao) return Boolean(opcao.selected);
+
+    // label.control e o campo do rotulo, dentro dele ou ligado por "for".
+    const rotulo = elemento.closest("label");
+    const controle = rotulo ? rotulo.control : null;
+    if (controle && (controle.type === "radio" || controle.type === "checkbox")) {
+      return Boolean(controle.checked);
+    }
+
+    const ATRIBUTOS = ["aria-selected", "aria-checked", "aria-pressed", "aria-current"];
+    let atual = elemento;
+
+    for (let nivel = 0; atual && nivel < 4; nivel++) {
+      for (let i = 0; i < ATRIBUTOS.length; i++) {
+        const valor = atual.getAttribute(ATRIBUTOS[i]);
+        // aria-current ligado vale "page", "date" ou "true"; so "false"
+        // desliga. Os outros tres usam "true"/"false".
+        if (valor !== null && valor !== undefined) return valor !== "false";
+      }
+      atual = atual.parentElement;
+    }
+
+    return undefined;
+  }
+
+  /**
    * Caminho da URL com o que pode identificar alguem trocado por marcas.
    *
    * O diagnostico precisa dizer EM QUAL TELA a leitura aconteceu - so o host
@@ -1621,6 +1696,10 @@
       // O que o coletor gravaria se varresse agora ({} = nada passou pelas
       // travas). Em vitrine ele nem varre, entao fica null.
       capturariaAgora: captura,
+      // De qual periodo sao os numeros da tela: textos de filtro, com a opcao
+      // escolhida marcada quando o controle diz (#47, ver
+      // coletarTextosDePeriodo).
+      periodo: coletarTextosDePeriodo(document),
       // Contagem por motivo primeiro: com 50 anuncios na tela, e ela que
       // mostra de relance se o problema e o mesmo em todos.
       resumoDasRecusas: resumirRecusas(recusas),
@@ -1697,8 +1776,9 @@
     // estao la e nao ha o que esperar.
     coletar();
 
-    // Busca automatica: so no site do ML, nunca nos arquivos de teste locais.
-    if (window.location.hostname.indexOf("mercadolivre") !== -1) {
+    // Busca automatica: so quando ligada (ver BUSCA_AUTOMATICA_LIGADA) e so no
+    // site do ML, nunca nos arquivos de teste locais.
+    if (BUSCA_AUTOMATICA_LIGADA && window.location.hostname.indexOf("mercadolivre") !== -1) {
       atualizarEmSegundoPlano();
     }
 

@@ -3,7 +3,7 @@
 > Cole este arquivo inteiro no início de uma nova conversa. Ele contém tudo que é
 > preciso saber para continuarmos corrigindo os problemas sem refazer a análise.
 >
-> **Atualizado em 15/09/2026, depois do lote 21 (robustez geral).** O que falta fazer está
+> **Atualizado em 15/09/2026, depois do lote 23a (período no diagnóstico).** O que falta fazer está
 > na **seção 5**. O que já foi feito está resumido e sinalizado na **seção 6**.
 
 ---
@@ -35,10 +35,12 @@ envolvido → propõe a correção → aplicamos.**
 - **Sem acentos nos comentários de código** (o projeto segue isso). Em texto de
   interface exibido para a usuária, acentos normais.
 - **Antes de corrigir, confirme a linha.** Os números de linha da seção 5 valem para o
-  estado do código em **15/09/2026, depois do lote 21**. Depois de cada correção eles
+  estado do código em **15/09/2026, depois do lote 23a**. Depois de cada correção eles
   saem do lugar.
-- **Toda correção entra com caso no harness** (`node teste/test-parsing.js`) quando a
-  função for testável fora do navegador. Ver #53.
+- **Toda correção entra com caso de teste**: no harness (`node teste/test-parsing.js`)
+  quando a função for testável fora do navegador; na página de teste
+  (`node teste/servidor-teste.js` e abrir `teste/rodar-no-navegador.html`) quando
+  depender de DOM real, painel ou popup.
 - **Nunca coloque dado real no repositório** (código MLB, título ou slug de produto,
   nome de vendedor). Use valores fictícios como `MLB1234567890` / `MLBU0000000001`.
   O repositório é público (ver #50).
@@ -54,7 +56,7 @@ envolvido → propõe a correção → aplicamos.**
 (visitas, vendas, conversão, receita estimada) nos anúncios do Mercado Livre de uma
 vendedora.
 
-Caminho: `C:\codes\extensaoML` · versão no manifest: **0.1.4**
+Caminho: `C:\codes\extensaoML` · versão no manifest: **0.1.6**
 
 **Restrição central do projeto:** a API pública do Mercado Livre devolve 403 e
 exigiria OAuth ou cookie de sessão. Por isso a extensão **raspa a tela** em vez de
@@ -72,23 +74,28 @@ extensaoML/
 │                               icons e src). E ESTE zip que vai para a cliente.
 ├── icons/                   <- icon16/32/48/128.png
 ├── src/
-│   ├── background.js (~93)  SERVICE WORKER (MV3). Faz o fetch das telas
-│   │                        aprendidas (so https no dominio do ML, so a
-│   │                        pedido da extensao, com tempo limite).
-│   ├── coletor.js (~1790)   CAPTURA. Roda em toda pagina do ML. Le cada
-│   │                        rotulo pela fila de numeros e rotulos e grava em
-│   │                        chrome.storage.local COM o rastro de origem de
-│   │                        cada numero. Responde o diagnostico do popup,
-│   │                        inclusive por que cada numero foi recusado.
-│   ├── content.js (~756)    EXIBE. Acha o codigo do item na URL, le o
+│   ├── background.js (~182) SERVICE WORKER (MV3). GRAVA o cache para todas
+│   │                        as abas, uma leitura de cada vez (#21), e busca
+│   │                        telas para a atualizacao automatica (desligada).
+│   ├── gravacao.js (~185)   A REGRA de mesclar uma leitura no cache. Roda no
+│   │                        service worker e, como plano B, nas abas.
+│   ├── coletor.js (~1686)   CAPTURA. Roda em toda pagina do ML. Le cada
+│   │                        rotulo pela fila de numeros e rotulos e manda
+│   │                        gravar COM o rastro de origem de cada numero.
+│   │                        Responde o diagnostico do popup, inclusive por
+│   │                        que cada numero foi recusado.
+│   ├── content.js (~747)    EXIBE. Acha o codigo do item na URL, le o
 │   │                        storage e monta o painel azul - so com numero
 │   │                        que tem rastro. Preco so de dado estruturado.
 │   ├── content.css (~132)   Estilo do painel e do aviso verde.
-│   └── popup.html / popup.js (~325)  Painel de controle: lista o capturado
+│   └── popup.html / popup.js (~336)  Painel de controle (mostra a versao): lista o capturado
 │                            com a origem de cada numero, limpa dados, copia
 │                            diagnostico da aba aberta.
 ├── teste/
-│   ├── test-parsing.js             Harness Node (159 casos, 159/159 PASS em 15/09).
+│   ├── test-parsing.js             Harness Node (191 casos, 191/191 PASS em 15/09),
+│   │                               inclusive gravacao.js e o service worker.
+│   ├── servidor-teste.js           Servidor local (127.0.0.1, lista fechada).
+│   ├── rodar-no-navegador.html     Teste em DOM real (31 casos, 31/31 PASS).
 │   ├── publicacoes.html            Fixture da tela "Minhas publicacoes", com gabarito.
 │   ├── MLB-1111111111-anuncio.html Fixture da pagina de anuncio, com gabarito.
 │   ├── vitrine-up-sanitizada.html  Fixture sanitizada da vitrine /up/ real.
@@ -104,9 +111,9 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
 | Chave | Conteúdo |
 |---|---|
 | `mlmetrics_dados` | `{ MLB123: { visitas, vendas, capturadoEm, origem: { visitas: { trecho, tela, em, automatica }, vendas: {…} } } }` — o cache principal. Número sem `origem` não é exibido. |
-| `mlmetrics_diagnostico` | `{ host, caminho (mascarado), quando, amostras }` — gravado quando a captura falha |
+| `mlmetrics_diagnostico` | `{ host, caminho (mascarado), quando, amostras, periodo }` — gravado quando a captura falha |
 | `mlmetrics_origens` | até 3 URLs (sem query) de telas de vendedor que já entregaram números |
-| `mlmetrics_ultima_busca` | timestamp da última busca automática (trava de 2 h) |
+| `mlmetrics_ultima_busca` | timestamp da última busca automática (trava de 2 h). Com a busca desligada, a chave não é mais criada. |
 
 ### Fluxo
 
@@ -118,20 +125,24 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
    2. `paginaMencionaVisita(doc)` — sem "visita" fora do painel → nada.
    3. `TreeWalker` sobre nós de texto (sem `script`/`style`/`template`/`noscript`/
       `[hidden]`), amarrando cada número a um código `MLB…` pelo card
-      (`contextoDoAnuncio`). A leitura de cada rótulo (`lerRotulo`) monta a **fila de
+      (`contextoDoAnuncio`; card com link do item e do catálogo vale o item — #38). A
+      leitura de cada rótulo (`lerRotulo`) monta a **fila de
       peças coladas** — número, rótulo, número… — e as pontas dizem o formato: começa
       com número → valor antes do rótulo; começa com rótulo → valor depois; pontas
       iguais → ambíguo, não lê. Número que não é contagem (data, hora, decimal, %,
       período, "mil", `R$`, `+N`, "desde 2024") é recusado (`motivoDoNumero`). Uma
-      recusa para de subir no DOM.
+      recusa — ou um nível com mais de 5 mil caracteres — para a subida no DOM.
    4. Visita exigida **por anúncio** — código sem visita lida nesta varredura fica
       de fora.
-   5. `descartarImplausiveis` — descarta anúncio com vendas > visitas.
+   5. `anotarImplausiveis` — vendas acima das visitas **não** descartam mais o anúncio
+      (#40): os números ficam e o painel mostra um alerta.
 
    Cada número sai com o **rastro de origem** (`trechoDaLeitura`: o texto exato entre
-   « », com 20 caracteres de contexto, mais a tela mascarada). Grava pela fila
-   `comCache` (rastro mesclado por métrica e carimbado com a hora), mostra o toast
-   verde e lembra o endereço da tela (nunca URL de anúncio isolado). Sem captura → `salvarDiagnostico` (trava de 3 min **por tela**).
+   « », com 20 caracteres de contexto, mais a tela mascarada). A gravação vai por
+   mensagem ao **service worker**, que mescla (`gravacao.js`: por métrica, rastro
+   carimbado com a hora) e grava uma leitura de cada vez para todas as abas; se ele não
+   responder, a aba grava sozinha pela mesma regra. Depois mostra o toast verde e lembra
+   o endereço da tela (nunca URL de anúncio isolado). Sem captura → `salvarDiagnostico` (trava de 3 min **por tela**).
    Se a extensão for recarregada, o script vira órfão e se desliga (`extensaoViva`).
 2. **`content.js`** roda em URL que contém `MLB…`: monta os códigos candidatos
    (`codigosDaPagina`: `item_id`/`wid` da query ou do `#` primeiro, o caminho por
@@ -139,22 +150,27 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
    sem rastro de origem** (`somenteComOrigem`), lê o preço **só de dado estruturado**
    (`meta[itemprop=price]` ou JSON-LD) e monta o painel
    azul com botão de fechar. Passar o mouse sobre uma linha mostra de onde o número
-   veio (ou a conta, nos calculados). A idade exibida é a da leitura mais antiga. O fechamento vale para aquele anúncio até o F5. Reage a
+   veio (ou a conta, nos calculados). A idade exibida é a da leitura mais antiga. Sem
+   número conferido, **não há painel** (#46). Vendas acima das visitas → alerta no
+   painel, sem conversão nem "vende a cada" (#40). O fechamento vale para aquele anúncio até o F5. Reage a
    troca de URL (poller de 1 s, que para quando o script fica órfão) e a
    `chrome.storage.onChanged` — só quando o registro do anúncio da tela mudou.
-3. A cada 2 h o coletor pede ao **service worker** o HTML das origens aprendidas. O SW
-   confere quem pediu e o endereço (só https no domínio do ML, também depois de
-   redirecionamento), faz o `fetch` com a sessão e tempo limite de 20 s, devolve o
-   texto, e o content script parseia com `DOMParser` + `varrerPagina` e grava em
-   silêncio (sem toast).
-4. **Popup:**
+3. **Busca automática: DESLIGADA** (`BUSCA_AUTOMATICA_LIGADA = false` no coletor).
+   Quando ligada, a cada 2 h o coletor pede ao **service worker** o HTML das origens
+   aprendidas; o SW confere quem pediu e o endereço (só https no domínio do ML, também
+   depois de redirecionamento), faz o `fetch` com a sessão e tempo limite de 20 s, e o
+   content script parseia com `DOMParser` + `varrerPagina` e grava em silêncio.
+   Desligada porque a tela de vendedor é montada por JavaScript, e o HTML buscado muito
+   provavelmente não traz os números.
+4. **Popup** (com a versão ao lado do nome):
    - "Limpar dados guardados" apaga todas as chaves `mlmetrics_`.
    - A lista mostra, embaixo de cada número, o rastro (trecho « », tela, hora).
      Registro sem rastro aparece como "sem origem (versão antiga)".
    - "Copiar diagnóstico" pede à **aba ativa** um diagnóstico na hora
      (`chrome.tabs.sendMessage` → `diagnosticarTelaAtual`) e monta o relatório:
      `versao`, `telaAtual` (host, caminho mascarado, vitrine, mencionaVisita,
-     capturariaAgora, **resumoDasRecusas** e **recusas** — por que cada rótulo não
+     capturariaAgora, **periodo** — textos de filtro de período, com `marcado` na opção
+     escolhida (#47) —, **resumoDasRecusas** e **recusas** — por que cada rótulo não
      virou número —, amostras com até 12 por métrica; ou o erro "a aba não respondeu,
      aperte F5"),
      `origens` mascaradas, `capturado` e `ultimoDiagnosticoGuardado`. O texto aparece
@@ -170,13 +186,15 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
 |---|---|
 | Revisão 1 (11/09) — #1 a #33 | ✅ corrigidos (lotes 1–8). Seção 6. |
 | Página real (14/09) — #34 a #36 | ✅ corrigidos (lotes 10, 12 e 16). Seção 6. |
-| Revisão 2 (14/09) — #37 a #55 | ✅ **13 resolvidos** (#37, #39, #41, #42, #43, #44, #45, #48, #49, #51, #52, #54, #55) · ⚠️ **parciais**: #38 (exibição resolvida; captura de card com 2 códigos aberta), #47 (observer resolvido; período aberto), #50 (decisão do repositório), #53 (contínuo) · ⬜ **abertos**: #40, #46. |
+| Revisão 2 (14/09) — #37 a #55 | ✅ **17 resolvidos** (#37, #38, #39, #40, #41, #42, #43, #44, #45, #46, #48, #49, #51, #52, #53, #54, #55) · ⚠️ **parciais**: #47 (período aberto), #50 (decisão do repositório). |
 | Pedido do Pedro (14/09) — #56 | ✅ **só dado com prova**: todo número exibido tem rastro de origem conferível (lote 20). |
 | Relato da cliente (15/09) — #57 a #61 | ✅ **lote 21**: "no anúncio aparecem só as visitas" levou à troca da leitura por fila de peças (#57), à recusa de preço inteiro e faixa "+N" (#58), ao diagnóstico com o motivo de cada recusa (#59), à receita só com preço estruturado (#60) e a acabamentos (#61). |
-| Resíduos aceitos | ⚠️ #21 (corrida entre abas). Seção 6. |
-| Harness | **159/159 PASS** (+30 casos no lote 21). `node --check` ok em todos os JS. |
-| Teste em DOM real | ✅ lote 21, no navegador interno (servidor local só com `src/` e fixtures fictícias, `chrome` falso): gabarito de `publicacoes.html` exato; card com números antes dos rótulos em elementos irmãos ("359 visitas 12 vendas 5 disponíveis") → **359 / 12** — a 0.1.3 perdia as vendas ou gravava 5; "Estoque: 5 \| Vendas" recusado, com o motivo no diagnóstico; painel com 13,9%; receita "—" explicada quando falta preço estruturado; código do item do `pdp_filters` escolhido antes do código do caminho. |
-| Pacote | `dist\ML-Metrics-0.1.4.zip`. Zips anteriores apagados (superados). |
+| Pedido do Pedro (15/09) — lote 22 | ✅ "pode fazer tudo": limite de custo da leitura, teste no navegador versionado, testes da gravação, versão no popup, #38 (item + catálogo), #21 (gravação única no service worker) e as três decisões recomendadas — #46 (sem painel "Sem dados"), #40 (alerta em vez de descarte) e busca automática desligada. |
+| Pedido do Pedro (15/09) — lote 23a | ✅ **período no diagnóstico** (preparo do #47): `telaAtual.periodo` traz os textos de filtro de período da tela ("Últimos 30 dias", intervalo de datas, abas, lista) e marca a opção escolhida. Não muda o que é gravado nem o painel. |
+| Revisão 1 — resíduo #21 | ✅ corrida entre abas resolvida no lote 22 (gravação única no service worker). |
+| Harness | **221/221 PASS** (+30 casos no lote 23a, período no diagnóstico; o lote 22 trouxe `gravacao.js` e o service worker com gravações simultâneas). `node --check` ok em todos os JS. |
+| Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **37/37 PASS**. Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
+| Pacote | `dist\ML-Metrics-0.1.6.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
 
 ### ⚠️ Repositório público — decisão do Pedro
 
@@ -190,14 +208,15 @@ git/GitHub — é ação do Pedro.
 
 ### Verificação manual pendente (Pedro, antes de enviar à cliente)
 
-O harness não cobre o que depende do navegador. O comportamento dos itens 1, 3, 5, 6 e
-7 já passou no teste em DOM real com `chrome` falso (lotes 20 e 21); falta confirmar com
-a extensão de verdade (mensagens popup ↔ aba e storage reais). Com a extensão carregada
-(0.1.4):
+O harness e o teste no navegador (`teste/rodar-no-navegador.html`) cobrem os itens 1, 3,
+5, 6 e 7 com `chrome` falso, e o item 8 no Node; falta confirmar com a extensão de
+verdade (mensagens popup ↔ aba ↔ service worker e storage reais). Com a extensão
+carregada (0.1.6):
 
 1. **#44** — numa aba do ML, ícone → "Copiar diagnóstico": o relatório tem `telaAtual`
-   com `host`, `caminho` mascarado, `vitrine`, `mencionaVisita`, `capturariaAgora` e
-   `amostras`.
+   com `host`, `caminho` mascarado, `vitrine`, `mencionaVisita`, `capturariaAgora`,
+   `periodo` e `amostras`. Numa tela com filtro de período, `periodo` lista o filtro e
+   marca o escolhido (`marcado: true`).
 2. **#44** — numa aba que não é do ML (ex.: `edge://extensions`), "Copiar diagnóstico":
    `telaAtual.erro` com a mensagem de F5.
 3. **#42** — com uma aba do ML aberta, recarregar a extensão e, **sem F5**, copiar o
@@ -213,18 +232,23 @@ a extensão de verdade (mensagens popup ↔ aba e storage reais). Com a extensã
 7. **#59** — numa tela de vendedor, "Copiar diagnóstico": `telaAtual.resumoDasRecusas`
    conta os rótulos que não viraram número, por motivo, e `telaAtual.recusas` mostra o
    trecho de cada um.
+8. **#21** — com duas telas de vendedor abertas em abas diferentes (F5 nas duas), o
+   popup lista os anúncios das duas; nenhuma apaga o que a outra gravou.
+9. **Popup** — o título mostra "ML Metrics v0.1.6".
 
 ### Ação pendente (depois da verificação)
 
-1. Rodar `empacotar.ps1` e enviar `dist\ML-Metrics-0.1.4.zip` à cliente.
+1. Rodar `empacotar.ps1` e enviar `dist\ML-Metrics-0.1.6.zip` à cliente.
 2. A cliente segue **"Depois de uma atualização"** do guia: substituir os arquivos na
-   mesma pasta, recarregar a extensão, conferir a versão **0.1.4**, **F5** nas abas do ML.
+   mesma pasta, recarregar a extensão, conferir a versão **0.1.6** (também no popup),
+   **F5** nas abas do ML.
 3. A cliente clica **"Limpar dados guardados"** (agora apaga também as origens
    envenenadas pelo build antigo).
 4. A cliente abre **"Minhas publicações"**, espera carregar, clica em **"Copiar
    diagnóstico" nessa tela** e cola na conversa. Se as vendas ainda não aparecerem,
-   `telaAtual.resumoDasRecusas` e `telaAtual.recusas` dizem o motivo exato. O campo
-   `telaAtual` é o material que destrava os lotes 22–24.
+   `telaAtual.resumoDasRecusas` e `telaAtual.recusas` dizem o motivo exato. O
+   `telaAtual.periodo` decide o #47 (período), e o mesmo `telaAtual` valida #38, #48 e
+   #57 na tela real.
 5. A cliente faz a **conferência de 3 anúncios** (passo 7 do guia): número do ML ×
    número da extensão, com o trecho « » de cada um.
 
@@ -238,11 +262,11 @@ projeto. Seria o primeiro contato com a tela real antes da cliente.
 ### Maior risco aberto
 
 Continua o mesmo desde o começo: **a tela real de vendedor nunca foi vista.** As três
-tentativas de arquivo real vieram como vitrine pública. A captura de card com dois
-códigos (#38), o período (#47) e a plausibilidade (#40) só se resolvem de verdade com
-ela; a leitura por fila (#57) e a trava por anúncio (#48) recusam o que é ambíguo e
-precisam ser validadas nela. O diagnóstico da aba ativa com motivos (#44, #59) e a
-conferência com rastro (#56) foram feitos justamente para trazê-la e checá-la.
+tentativas de arquivo real vieram como vitrine pública. O período (#47) só se resolve
+de verdade com ela; a leitura por fila (#57), a trava por anúncio (#48) e a regra do
+card com item + catálogo (#38) foram feitas às cegas e precisam ser validadas nela. O
+diagnóstico da aba ativa com motivos (#44, #59) e a conferência com rastro (#56) foram
+feitos justamente para trazê-la e checá-la.
 
 ---
 
@@ -255,81 +279,30 @@ Mantenha estes IDs estáveis: eu vou me referir a eles pelo número.
 
 | # | Sev. | Título | Status | Depende da tela real? | Lote |
 |---|---|---|---|---|---|
-| #38 | CRÍTICO | Card com link do item **e** do catálogo tem 2 códigos e é ignorado (a exibição foi resolvida no lote 21) | ⚠️ parcial | Sim (links dos cards) | 22 |
-| #40 | ALTO | "Vendas nunca passam de visitas" é falso e só vale por varredura | ⬜ | Sim (unidade ou pedido) | 23 |
-| #46 | MÉDIO | #18 pela metade: painel "Sem dados" em anúncio de qualquer vendedor | ⬜ | Decisão (mostrar ou não) | 22 |
-| #47 | MÉDIO | Período (7/30 dias) não é registrado (o observer foi resolvido no lote 21) | ⚠️ parcial | Sim (período) | 24 |
+| #47 | MÉDIO | Período (7/30 dias) não é registrado (observer resolvido no lote 21; o período já vem no diagnóstico desde o lote 23a) | ⚠️ parcial | Sim (período) | 23b |
 | #50 | MÉDIO | Privacidade no repositório (resíduo: repo público + histórico) | ⚠️ parcial | Não — decisão do Pedro | — |
-| #53 | BAIXO | Harness: lacunas que sobraram | ⚠️ parcial | Não | contínuo |
-
----
-
-### GRUPO I — Plausibilidade
-
-#### #40 [ALTO] "Vendas nunca passam de visitas" é falso, e só vale por varredura
-
-- **Onde:** `src/coletor.js:867-897` — `descartarImplausiveis`; merge em `:1113-1121`.
-  Desde o lote 21 o descarte aparece no diagnóstico ("vendas maiores que visitas").
-- **Causa 1:** no ML, "vendidos" costuma contar **unidades**. Um comprador leva 12
-  unidades numa visita só.
-- **Causa 2:** a checagem roda sobre o resultado da varredura, **antes** do merge.
-  Visitas de uma tela antiga + vendas de uma tela nova podem deixar vendas > visitas
-  no cache.
-- **Evidência (Node, 14/09):**
-  ```
-  descartarImplausiveis({ MLB1: { visitas: 5, vendas: 12 } })  => {}   (so console.warn)
-  ```
-- **Impacto:** anúncio legítimo de venda em quantidade desaparece em silêncio; do outro
-  lado, conversão acima de 100% passa pelo merge sem trava.
-- **Direção (decisão):** (a) virar alerta visual no painel em vez de descartar;
-  (b) tolerância (ex.: vendas > visitas × N); (c) checar também depois do merge.
-  Confirmar na tela real se "vendas" é unidade ou pedido.
-
----
-
-### GRUPO J — Identidade e escopo: número atribuído ao anúncio errado
-
-#### #38 [CRÍTICO] Card com link do item e do catálogo é ignorado — ⚠️ parcial
-
-- **Já feito (lote 21):** a exibição. O `content.js` monta os códigos candidatos
-  (`codigosDaPagina`, `src/content.js:69`) — `item_id`/`wid` da query ou do `#`
-  primeiro, o caminho por último — e usa o primeiro com número provado
-  (`escolherRegistro`, `:382`). Testado no harness e em DOM real.
-- **Falta — onde:** `src/coletor.js:431-491` e `:494-512` — `contextoDoAnuncio` /
-  `codigosDentroDe` (desistência em `:472`).
-- **Causa:** o ML tem três espaços de identificador: item (`MLB-3456789012`), produto
-  de catálogo (`/p/MLB…`) e user product (`/up/MLBU…`). Um card de "Minhas publicações"
-  com link do item **e** link do catálogo tem 2 códigos distintos → o coletor desiste
-  do card (verificado: resultado `{}`). Mesmo risco para user product que agrupa vários
-  itens. Desde o lote 21 isso aparece no diagnóstico como "bloco com N anúncios".
-- **Direção:** na tela real, ver para onde apontam os links do card. Se for sempre item
-  + catálogo do mesmo produto, preferir o código de item (`MLB` sem letra) quando os
-  outros forem de catálogo ou user product.
+| — | — | Decisão: religar a busca automática? | ⬜ | Sim (o HTML buscado traz os números?) | — |
 
 ---
 
 ### GRUPO L — Painel e reatividade
-
-#### #46 [MÉDIO] #18 pela metade: painel "Sem dados" em anúncio de qualquer vendedor
-
-- **Onde:** `src/content.js:653-665`.
-- **Causa:** a correção do #18 só esconde o painel vazio quando o cache está VAZIO. Com
-  um anúncio capturado, todo produto aberto mostra "Sem dados deste anúncio ainda. Abra
-  'Minhas publicações'…".
-- **Impacto:** ruído em toda navegação como compradora, com uma promessa que nunca se
-  cumpre para produto alheio. Somado ao #38, aparece também nos anúncios dela.
-- **Direção:** não mostrar painel vazio por padrão (a dica fica no popup), ou só em
-  anúncio reconhecido como dela. Depende do #38.
 
 #### #47 [MÉDIO] Período (7/30 dias) não é registrado — ⚠️ parcial
 
 - **Já feito (lote 21):** o observer passou a ver texto e link trocados no lugar
   (`characterData` e `attributes: href`, `src/coletor.js:1783`) e só ignora um lote de
   mutações quando **todas** são da extensão (`every`, `:1760`).
+- **Já feito (lote 23a):** o diagnóstico traz `periodo` (`coletarTextosDePeriodo`,
+  `src/coletor.js`): textos curtos de filtro de período da tela — "Últimos 30 dias",
+  "Este mês", intervalo de datas, inclusive no valor de um campo — com `marcado` quando
+  o controle (lista, radio, aba, botão) diz qual está escolhido. Vocabulário fechado
+  (`ehTextoDePeriodo`), no máximo 20 textos, sem campo escondido, de senha, e-mail ou
+  telefone. Só diagnóstico: não muda gravação nem painel.
 - **Falta:** nada registra o **período** do número lido. Se a tela estiver com filtro
   de 30 dias, o painel mostra essas visitas como se fossem o total. (Desde o lote 20 o
   painel diz só "Visitas", e o rastro mostra o texto exato que foi lido.)
-- **Direção:** ler o rótulo do filtro na tela real e guardar junto do rastro.
+- **Direção (lote 23b):** com o `telaAtual.periodo` da tela real, decidir como ler o
+  filtro escolhido e guardar o período junto do rastro.
 
 ---
 
@@ -347,25 +320,6 @@ Mantenha estes IDs estáveis: eu vou me referir a eles pelo número.
   `35f583a`) ainda tem o código `MLBU` e o slug reais, e este `contexto.md` traz
   anotações sobre a cliente. Opções: tornar o repositório privado (resolve de uma vez);
   reescrever o histórico (não recomendado; e Claude não escreve em git).
-
-#### #53 [BAIXO] Harness: lacunas que sobraram — ⚠️ parcial
-
-- **Onde:** `teste/test-parsing.js`; fixtures em `teste/`.
-- **Já feito (lote 21):** a extração ignora comentários, strings e regex (`fimDoBloco`,
-  `:58`) e procura `function nome(`; os comentários velhos das fixtures foram
-  corrigidos.
-- **Já coberto:** lotes 17–19 (#39, #41, #52, #55, `caminhoMascarado`, stub com
-  `[attr]`); lote 20 (#37, #48, rastro, `mudou`, `mesclarOrigem`, `faltaOrigem`,
-  `somenteComOrigem`); lote 21 (fila de peças, motivos de recusa, diagnóstico,
-  `codigosDaPagina`, `escolherRegistro`, `precoDoJsonLd`, `diasDesde`,
-  `formatarPercentual`, card com números em elementos irmãos).
-- **Falta:**
-  - `salvar` inteiro (a fila com o storage) não tem teste automático.
-  - O que depende do navegador (popup ↔ aba, script órfão, fechar painel, observer) só
-    foi testado à mão, em DOM real com `chrome` falso (lotes 20 e 21).
-  - As fixtures HTML só rodam com um servidor local (não abrem mais em `file:///` desde
-    o #5), e esse servidor não está versionado.
-- **Direção:** cada correção dos próximos lotes entra com caso no harness.
 
 ---
 
@@ -399,10 +353,10 @@ limitação aceita).
 | #15 | MÉDIO | Bug no `sniffer.js` | ✅ | 7 | arquivo removido |
 | #16 | MÉDIO | `lerPreco` pegava o primeiro preço | ✅ | 4, 21 | hoje só dado estruturado (#60) |
 | #17 | MÉDIO | Lista de origens enchia de URLs inúteis | ✅ | 6, 17 | "Limpar" agora apaga as origens (#43) |
-| #18 | MÉDIO | Painel vazio em qualquer anúncio | ⚠️ | 4 | **parcial** → reaberto como **#46** |
+| #18 | MÉDIO | Painel vazio em qualquer anúncio | ✅ | 4, 22 | o painel "Sem dados" deixou de existir (#46) |
 | #19 | MÉDIO | Conversão 0% exibida como "sem dado" | ✅ | 4, 19 | 0/0 e 3/0 resolvidos no #39 |
 | #20 | MÉDIO | Diagnóstico capturava demais | ✅ | 6, 11, 18 | caminho mascarado (#44), origens mascaradas (#50) |
-| #21 | MÉDIO | Sobrescrita concorrente entre abas | ⚠️ | 5 | **limitação aceita:** fila só na mesma aba; entre abas continua |
+| #21 | MÉDIO | Sobrescrita concorrente entre abas | ✅ | 5, 22 | gravação única no service worker (`gravacao.js` + fila do `background.js`); testado com três gravações simultâneas |
 | #22 | BAIXO | CSS `:last-of-type` que nunca se aplicava | ✅ | 7 | |
 | #23 | BAIXO | `temLetra` com intervalo Unicode torto | ✅ | 2 | |
 | #24 | BAIXO | `numeroAntesDe` só via a primeira ocorrência | ✅ | 2 | |
@@ -437,6 +391,10 @@ limitação aceita).
 | #56 | ALTO | Número exibido sem prova de origem (pedido do Pedro: "ter certeza que mostra dado real, não inventado") | ✅ | 20 | Auditoria: só existe um ponto que grava métrica, sempre a partir de texto da página — nada inventado. Cada leitura agora grava `origem[métrica] = { trecho « », tela mascarada, em, automatica }` (`lerRotulo`, `trechoDaLeitura`, `mesclarOrigem`). Painel e popup só exibem número com rastro (`somenteComOrigem`); o title de cada linha mostra a origem ou a conta; "Visitas totais" virou "Visitas"; receita explicada como estimativa; popup com fundo branco e números no formato do ML; guia com conferência de 3 anúncios. Harness + DOM real. |
 | #49 | MÉDIO | Service worker buscava qualquer URL recebida | ✅ | 21 | `enderecoPermitido`: só `https` no domínio do ML, também depois de redirecionamento; confere `remetente.id`; tempo limite de 20 s (`AbortController`). A decisão de manter a busca automática continua (seção 8). |
 | #54 | BAIXO | `content.js` usava a URL com query | ✅ | 21 | `codigosDaPagina` só lê `pdp_filters`/`item_id`/`wid` (query ou `#`) e o caminho; `?search=MLB…` não gera painel. |
+| #38 | CRÍTICO | Card com link do item e do catálogo era ignorado | ✅ | 21, 22 | Lote 21: exibição (`codigosDaPagina` + `escolherRegistro`). Lote 22: `codigosDentroDe` separa os links de item dos de catálogo (`/p/`) e user product (`/up/`); um item só → é dele; dois itens → continua ambíguo. **Validar na tela real.** |
+| #40 | ALTO | Vendas acima das visitas descartavam o anúncio | ✅ | 22 | Decisão (recomendação aceita): mostrar com alerta. `anotarImplausiveis` não descarta, só avisa (console e diagnóstico); `calcular` marca `vendasAcimaDasVisitas` e deixa conversão e "vende a cada" em branco; o painel mostra o alerta. |
+| #46 | MÉDIO | Painel "Sem dados" em anúncio de qualquer vendedor | ✅ | 22 | Decisão (recomendação aceita): sem painel quando não há número conferido; `montarPainelVazio` removido; a dica ficou no popup. |
+| #53 | BAIXO | Harness frágil e com lacunas | ✅ | 21, 22 | Extração robusta (lote 21); `gravacao.js` e o service worker testados no Node, com três gravações simultâneas (lote 22); teste em DOM real versionado (`teste/servidor-teste.js` + `teste/rodar-no-navegador.html`, 31 casos). |
 | #50 | MÉDIO | Privacidade no empacotamento e no repositório | ⚠️ | 17 | Parcial — o que falta está na seção 5. |
 
 ### Relato da cliente (15/09) — #57 a #61, resolvidos no lote 21
@@ -451,6 +409,22 @@ conservadora do #37 (0.1.3) era a causa provável — e escondia um erro pior.
 | #59 | ALTO | O diagnóstico não dizia por que um número não virou dado. | ✅ | `varrerPagina(doc, url, recusas)` anota cada rótulo recusado (ambíguo, preço, bloco com N anúncios, sem link, sem número, anúncio sem visitas, vendas > visitas) com o trecho; `telaAtual.resumoDasRecusas` e as 40 primeiras `recusas`; amostras com até 12 por métrica. |
 | #60 | MÉDIO | A receita estimada usava o preço visível por heurística (podia ser parcela ou valor riscado). | ✅ | `lerPreco` só lê dado estruturado (`meta[itemprop=price]` ou JSON-LD `offers.price`); sem ele a receita fica "—", com a explicação no title. |
 | #61 | BAIXO | Acabamentos: idade em blocos de 24 h ("hoje" para ontem à noite), percentual "13.9%", avisos "Unchecked runtime.lastError". | ✅ | `diasDesde` por dia de calendário; `formatarPercentual` ("13,9%"); callbacks lendo `lastError` nas gravações. |
+
+### Lote 22 — decisões e acabamentos (15/09/2026)
+
+| Item | O que foi feito |
+|---|---|
+| Busca automática | **Desligada** (`BUSCA_AUTOMATICA_LIGADA = false`, recomendação aceita). O código e o atendimento validado no service worker ficam prontos para religar se a tela real mostrar que o HTML buscado traz os números. Guia da cliente: a extensão não faz nada por conta própria. |
+| Custo da leitura | `LIMITE_TEXTO_POR_NIVEL = 5000`: a busca pelo valor para de subir num bloco maior que isso (medido: ~7 ms por leitura num bloco de 100 mil caracteres, repetido por rótulo e por nível). |
+| Versão no popup | "ML Metrics v0.1.5" ao lado do nome; o guia manda conferir ali. |
+
+### Lote 23a — período no diagnóstico (15/09/2026)
+
+| Item | O que foi feito |
+|---|---|
+| #47 (preparo) | `coletarTextosDePeriodo`, `ehTextoDePeriodo` e `estadoDoControle` em `coletor.js`; `telaAtual.periodo` e `mlmetrics_diagnostico.periodo`. O filtro costuma ficar longe dos rótulos, fora da janela das amostras: sem isso, o primeiro diagnóstico da cliente não diria de quando são os números. |
+| Guia da cliente | "Copiar diagnóstico" explica que o relatório traz o período e qual está escolhido. |
+| Testes | Harness +30 (vocabulário, stub com botão, abas aria, lista, campo, exclusões e limite) → **221/221**; navegador +6 com controles reais (`option.selected`, `label.control.checked`, `aria-pressed`, `input.value`) → **37/37**. `manifest.json` → **0.1.6**, zip gerado. |
 
 ---
 
@@ -488,6 +462,15 @@ números e rótulos e só recusa quando as pontas da fila não dizem o formato. 
 vai para o diagnóstico com o motivo, para a próxima rodada com a cliente responder "por
 que não apareceu" em vez de só "não apareceu".
 
+O lote 22 fechou tudo o que dependia só de código ou de decisão: gravação única entre
+abas, testes reproduzíveis no navegador, e três decisões de produto a favor de mostrar
+só o que é conferível — nada de painel "Sem dados", alerta em vez de descarte e nenhuma
+consulta automática com a sessão dela. O que sobrou depende da tela real.
+
+O lote 23a preparou essa tela: o diagnóstico agora também diz **de quando** são os
+números (textos de filtro de período, com a opção escolhida), para o #47 se resolver já
+na primeira rodada da cliente.
+
 ---
 
 ## 8. Ordem de correção sugerida
@@ -499,12 +482,12 @@ que não apareceu" em vez de só "não apareceu".
 | — | 19 — Correções independentes | #39, #41, #45, #52, #55 | ✅ | Feito em 14/09. |
 | — | 20 — Só dado com prova | #37, #48, #56 | ✅ | Feito em 14/09. |
 | — | 21 — Robustez geral (relato da cliente) | #57–#61, #49, #54; parte de #38, #47, #53 | ✅ | Feito em 15/09. |
-| 1 | **Verificação manual + decisão do repositório** | #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.1.4 para a cliente. |
-| 2 | **★ Ação — capturar "Minhas publicações" real + conferência de 3 anúncios** | — | ⬜ | "Copiar diagnóstico" na tela (`telaAtual`, com `resumoDasRecusas`) e passo 7 do guia. Decide #38, #40, #47 e valida #48/#57. |
-| 3 | **22 — Identidade e painel vazio** | #38, #46 | ⬜ | Card com dois códigos; decidir se o painel "Sem dados" continua. |
-| 4 | **23 — Plausibilidade** | #40 | ⬜ | Decisão: descartar, alertar ou tolerar vendas > visitas. |
-| 5 | **24 — Período** | #47 | ⬜ | Registrar o recorte (7/30 dias) junto do rastro. |
-| 6 | **Decisão — busca automática** | — | ⬜ | Com a tela real: se o HTML buscado não traz os números (tela montada por JavaScript), desligar a busca a cada 2 h. |
+| — | 22 — Tudo que não dependia da tela real | #21, #38, #40, #46, #53; limite de custo; versão no popup; busca desligada | ✅ | Feito em 15/09. |
+| — | 23a — Período no diagnóstico | #47 (preparo) | ✅ | Feito em 15/09. |
+| 1 | **Commit + verificação manual + decisão do repositório** | #21, #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.1.6 para a cliente. |
+| 2 | **★ Ação — capturar "Minhas publicações" real + conferência de 3 anúncios** | — | ⬜ | "Copiar diagnóstico" na tela (`telaAtual`, com `resumoDasRecusas`) e passo 7 do guia. Decide #47 e valida #38, #48 e #57. |
+| 3 | **23b — Período no rastro** | #47 | ⬜ | Com o `telaAtual.periodo` da tela real, registrar o recorte (7/30 dias) junto do rastro. |
+| 4 | **Decisão — religar a busca automática?** | — | ⬜ | Só se a tela real mostrar que o HTML buscado traz os números. |
 | — | **Contínuo** | #53 | ⬜ | Cada lote entra com casos no harness. |
 
 ---
@@ -513,17 +496,18 @@ que não apareceu" em vez de só "não apareceu".
 
 Exemplos do que dizer numa nova conversa, depois de colar este arquivo:
 
-- `"chegou o diagnóstico da tela real, vamos no lote 22"`
-- `"resolve o #46"`
-- `"me mostra como você corrigiria o #38 antes de aplicar"`
-- `"a busca automática vale a pena ou a gente desliga?"`
+- `"chegou o diagnóstico da tela real, vamos no lote 23b"`
+- `"resolve o #47"`
+- `"me mostra o que o diagnóstico da cliente diz antes de mexer"`
+- `"vale religar a busca automática?"`
 
 O que eu espero de você em cada rodada:
 
 1. Ler o trecho de código real (os números de linha podem ter mudado).
 2. Explicar a correção em uma ou duas frases antes de escrever código.
 3. Aplicar mantendo o padrão de comentários do projeto.
-4. Acrescentar o caso no harness e rodar `node teste/test-parsing.js`.
+4. Acrescentar o caso de teste e rodar os dois testes: `node teste/test-parsing.js` e a
+   página `teste/rodar-no-navegador.html` (com `node teste/servidor-teste.js`).
 5. Dizer o que **não** foi corrigido junto e por quê.
 6. Atualizar o resumo da seção 5, a seção 6 e o registro da seção 10.
 7. Se a mudança vai para a cliente: subir a versão no `manifest.json` e gerar o zip
@@ -561,9 +545,8 @@ paramos.
 | 19 — Correções independentes | ✅ feito | 14/09/2026 | **#39** conversão exige visitas > 0. **#41** `seguidoDeUnidade` + `%` antes do rótulo. **#45** `fechadoPara` + `onChanged` filtrado pelo anúncio + painel sai quando o dado some. **#52** `noscript, [hidden]` no filtro (aria-hidden fora, de propósito); stub do harness entende `[attr]`. **#55** `/p/MLB…/s`. Harness **103/103** (+24 casos), `node --check` ok. |
 | 20 — Só dado com prova | ✅ feito | 14/09/2026 | Pedido do Pedro: "ter certeza que ele vai mostrar dados reais, e não inventados". Auditoria: um único ponto grava métrica, sempre de texto lido na página. **#56:** rastro de origem por métrica (`lerRotulo`, `trechoDaLeitura`, `mesclarOrigem`, `faltaOrigem`; `mudou` passou a comparar só métricas); painel e popup só exibem número com rastro (`somenteComOrigem`); title com origem ou conta; "Visitas totais" → "Visitas"; idade = leitura mais antiga (resolve o #8 no que é exibido). **#37:** `numeroPresoAOutroRotulo` (conservador). **#48:** visita exigida por anúncio. Guia: passo 7 (conferência de 3 anúncios) e "O que me contar". Popup: fundo branco explícito e números no formato do ML. Harness **129/129**. **Teste em DOM real** no navegador interno (servidor local só com `src/` e fixtures fictícias; `chrome` falso): coletor bateu com o gabarito de `publicacoes.html`; painel bateu com o gabarito do anúncio; registro sem origem → "Sem dados"; fechar dura; órfão tira o painel; popup mostra o rastro. Claude in Chrome **não conectado** — teste na conta do Pedro não foi feito. `manifest.json` → **0.1.3**. |
 | 21 — Robustez geral | ✅ feito | 15/09/2026 | Relato da cliente: "no anúncio aparecem só as visitas". Verificado no Node que a regra do #37 da 0.1.3 perdia vendas em texto corrido ("359 visitas 12 vendas") e gravava número errado ("… 12 vendas 5 disponíveis" → 5), além de aceitar "R$ 49" e "+1.000". **#57:** `lerRotulo` por fila de peças coladas (pontas decidem antes/depois; ambíguo recusa; recusa para de subir). **#58:** `motivoDoNumero` (preço, faixa +N, data, hora, decimal, %, período, mil, ano). **#59:** recusas com motivo no diagnóstico (`resumoDasRecusas`, `recusas`) e amostras por métrica. **#60:** preço só estruturado (meta ou JSON-LD). **#61:** idade por calendário, "13,9%", `lastError` lido. **#49:** SW valida remetente, https + domínio (também após redirect) e tem timeout. **#54 / #38 (exibição):** `codigosDaPagina` + `escolherRegistro`. **#47 (observer):** `characterData`, `href`, `every`. **#53:** extração que ignora comentário, string e regex. Guia: o diagnóstico explica recusas. Fixtures: comentários corrigidos, gabarito "13,9%". Harness **159/159**. **DOM real** (servidor local, `chrome` falso): gabarito exato; irmãos "359 visitas 12 vendas 5 disponíveis" → 359/12; "Estoque: 5 \| Vendas" recusado com motivo; painel 13,9%; receita "—" sem preço estruturado; item do `pdp_filters` escolhido. `manifest.json` → **0.1.4**, zip gerado. |
-| Verificação manual + repositório | ⬜ a fazer | | Seção 4 (Pedro). |
-| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.1.4: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
-| 22 — Identidade e painel vazio | ⬜ a fazer | | #38 (captura), #46 |
-| 23 — Plausibilidade | ⬜ a fazer | | #40 |
-| 24 — Período | ⬜ a fazer | | #47 (período) |
-| Contínuo — Harness | ⬜ a fazer | | #53 |
+| 22 — Tudo que não dependia da tela real | ✅ feito | 15/09/2026 | Pedido do Pedro: "pode fazer tudo". **Limite de custo:** `LIMITE_TEXTO_POR_NIVEL = 5000` em `valorDoRotulo` (medido ~7 ms por leitura em bloco de 100 mil caracteres). **#21:** `src/gravacao.js` (regra pura de mesclar, carregada no SW e nas abas) + fila única no `background.js` (`gravarNaFila`, mensagem "salvar"); o coletor manda gravar e, sem resposta, grava na aba (`gravarNestaAba`); `comCache` e a mesclagem saíram do coletor. **#38:** `codigosDentroDe` prefere o item quando o card também tem link de catálogo/user product. **#40 (decisão):** `anotarImplausiveis` não descarta; `calcular.vendasAcimaDasVisitas`; alerta no painel. **#46 (decisão):** sem painel "Sem dados" (`montarPainelVazio` removido). **Busca automática (decisão):** `BUSCA_AUTOMATICA_LIGADA = false`; guia: a extensão não faz nada sozinha. **Popup:** versão ao lado do nome. **#53:** harness com `gravacao.js` e service worker (três gravações simultâneas, remetente alheio, busca fora do ML e sem https) → **191/191**; teste em DOM real versionado (`teste/servidor-teste.js`, `teste/rodar-no-navegador.html`) → **31/31**. `manifest.json` → **0.1.5** (content_scripts com `gravacao.js`), zip gerado. |
+| 23a — Período no diagnóstico | ✅ feito | 15/09/2026 | Pedido do Pedro: preparar o diagnóstico para o #47. `telaAtual.periodo` (e `mlmetrics_diagnostico.periodo`): textos curtos de filtro de período (`ehTextoDePeriodo`, vocabulário fechado), com `marcado` pela opção de `<select>`, radio/checkbox do `<label>` ou `aria-selected/checked/pressed/current` (`estadoDoControle`); intervalo de datas também no valor de campo (sem campo escondido, senha, e-mail ou telefone); até 20, sem repetição, sem o painel. Só leitura: gravação e painel não mudam. Guia: o diagnóstico traz o período. Harness **221/221**; navegador **37/37** (controles reais). `manifest.json` → **0.1.6**, zip gerado. |
+| Commit + verificação manual + repositório | ⬜ a fazer | | Seção 4 (Pedro). |
+| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.1.6: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
+| 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |

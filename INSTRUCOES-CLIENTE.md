@@ -16,17 +16,10 @@ Duas coisas importantes:
 
 ### O que a extensão faz por conta própria
 
-Com alguma página do Mercado Livre aberta, a ML Metrics consulta sozinha, no
-máximo a cada 2 horas, as telas de vendedor em que ela já capturou dados —
-para atualizar os números sem você precisar passar por elas de novo.
-
-Essa consulta é **invisível**: nenhuma aba ou janela abre. Se você vir uma
-página abrindo e fechando sozinha, não é a extensão.
-
-Ela usa a sua sessão do Mercado Livre (você já logada), mas não é igual a
-você abrir a tela: é só uma leitura rápida do texto, sem carregar o resto da
-página. Por isso ela acontece poucas vezes, e só nas telas de vendedor que
-você mesma já abriu.
+Nada. Ela só lê as telas do Mercado Livre que **você** abre, no momento em
+que você abre. Não consulta nenhuma página sozinha e não abre abas nem
+janelas. Para os números se atualizarem, basta passar de vez em quando por
+"Minhas publicações".
 
 ## Instalando
 
@@ -57,7 +50,8 @@ deles faz o navegador continuar usando a versão antiga:
 2. Abra `edge://extensions` (ou `chrome://extensions`).
 3. No quadrinho da **ML Metrics**, clique no **ícone de recarregar** (a seta
    circular que fica no canto do quadrinho). Confira se o número da versão é
-   o que eu mandei (ele aparece no quadrinho ou em **Detalhes**).
+   o que eu mandei: ele aparece no quadrinho, em **Detalhes**, e também ao
+   lado do nome quando você clica no ícone da extensão.
 4. **Aperte F5 em todas as abas do Mercado Livre que estiverem abertas.** A
    extensão só volta a funcionar numa aba depois que ela é recarregada — sem
    o F5, a aba fica sem extensão e parece que nada aparece.
@@ -79,7 +73,8 @@ deles faz o navegador continuar usando a versão antiga:
 
 6. Veja se aparece um **painel azul no canto superior direito**, com visitas,
    vendas e conversão. Um traço (—) no lugar de um número quer dizer que a
-   extensão não teve certeza e preferiu não mostrar.
+   extensão não teve certeza e preferiu não mostrar. Se o painel não aparecer,
+   é porque ela ainda não tem números conferidos desse anúncio.
 
 7. **Confira os números — é o passo mais importante.** Escolha 3 anúncios:
    - Anote as visitas e as vendas que o **Mercado Livre** mostra para cada um
@@ -125,7 +120,9 @@ texto:
 
 O relatório lê a tela que está aberta **no momento do clique** e mostra o que
 a extensão enxergou nela. Quando algum número não aparece (por exemplo, as
-vendas), o relatório diz o motivo. Também traz quais telas de vendedor ela já
+vendas), o relatório diz o motivo. Ele também traz os filtros de período que
+aparecem na tela (como "Últimos 30 dias") e qual deles está escolhido, para eu
+saber de quando são os números. Também traz quais telas de vendedor ela já
 reconheceu e os números guardados. Os endereços vão sem números e sem nome de
 produto. É a forma mais rápida de eu ver o que está acontecendo no seu
 navegador.

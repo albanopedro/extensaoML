@@ -32,6 +32,15 @@
   const aviso = document.getElementById("aviso");
   const campoDiagnostico = document.getElementById("diagnostico");
 
+  // Versao instalada ao lado do nome. A pessoa confere na hora se a
+  // atualizacao pegou, sem precisar abrir edge://extensions.
+  try {
+    document.getElementById("versao").textContent =
+      "v" + chrome.runtime.getManifest().version;
+  } catch (e) {
+    // contexto invalidado: o titulo fica sem versao
+  }
+
   /**
    * Mostra uma mensagem temporaria no rodape do popup.
    */

@@ -2,7 +2,7 @@
   "manifest_version": 3,
 
   "name": "ML Metrics",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "description": "Mostra metricas de desempenho em anuncios do Mercado Livre.",
 
   "icons": {
@@ -36,7 +36,7 @@
   "content_scripts": [
     {
       "matches": ["https://*.mercadolivre.com.br/*"],
-      "js": ["src/coletor.js", "src/content.js"],
+      "js": ["src/gravacao.js", "src/coletor.js", "src/content.js"],
       "css": ["src/content.css"],
       "run_at": "document_idle"
     }

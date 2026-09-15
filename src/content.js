@@ -325,6 +325,12 @@
     // certo que nao e. Sem visita, "vende a cada" nao tem o que responder.
     const temVendas = (vendas !== undefined && vendas > 0);
 
+    // Vendas acima das visitas (#40): pode ser venda de varias unidades para o
+    // mesmo comprador - "vendidos" conta unidades, nao pedidos. Os numeros
+    // continuam valendo, mas taxa e "vende a cada" deixam de fazer sentido:
+    // dariam conversao acima de 100% e "vende a cada 0 visitas".
+    const acimaDasVisitas = temAmbos && vendas > visitas;
+
     return {
       visitas: (visitas !== undefined) ? visitas : null,
       vendas: (vendas !== undefined) ? vendas : null,
@@ -333,14 +339,17 @@
       // nenhuma visita nao existe taxa: 0 vendas / 0 visitas daria NaN e
       // 3 / 0 daria Infinity, impressos como "NaN%" e "Infinity%". E anuncio
       // recem-criado ("0 visitas, 0 vendas") e caso comum, nao excecao.
-      conversao: (temAmbos && visitas > 0) ? (vendas / visitas) * 100 : null,
+      conversao: (temAmbos && visitas > 0 && !acimaDasVisitas) ? (vendas / visitas) * 100 : null,
 
       // Math.round porque "vende a cada 7,18 visitas" nao ajuda ninguem.
-      visitasPorVenda: (temVendas && visitas > 0) ? Math.round(visitas / vendas) : null,
+      visitasPorVenda: (temVendas && visitas > 0 && !acimaDasVisitas) ? Math.round(visitas / vendas) : null,
 
       // Receita bruta acumulada. E estimativa: assume que todas as vendas
       // sairam pelo preco atual, o que ignora promocoes passadas.
-      receita: temVendas && preco ? vendas * preco : null
+      receita: temVendas && preco ? vendas * preco : null,
+
+      // O painel mostra um alerta, em vez de esconder o anuncio.
+      vendasAcimaDasVisitas: acimaDasVisitas
     };
   }
 
@@ -517,7 +526,9 @@
     linhas.push(criarLinha(
       "Conversão",
       metricas.conversao !== null ? formatarPercentual(metricas.conversao) : null,
-      metricas.conversao !== null ? "Calculado: vendas ÷ visitas × 100." : null
+      metricas.conversao !== null
+        ? "Calculado: vendas ÷ visitas × 100."
+        : (metricas.vendasAcimaDasVisitas ? "Sem taxa: vendas acima das visitas." : null)
     ));
 
     linhas.push(criarLinha(
@@ -556,6 +567,17 @@
     // DIVs e o rodape e uma div tambem.
     linhas[linhas.length - 1].className += " " + PREFIXO + "-ultima";
 
+    // Vendas acima das visitas: os numeros sao os que a tela mostrou, e o
+    // painel avisa em vez de esconder (#40). Antes o anuncio inteiro era
+    // descartado em silencio - justo o que vende em quantidade.
+    if (metricas.vendasAcimaDasVisitas) {
+      const alerta = document.createElement("div");
+      alerta.className = PREFIXO + "-status " + PREFIXO + "-alerta";
+      alerta.textContent = "Vendas acima das visitas: pode ser venda de várias " +
+        "unidades para o mesmo comprador. Confira no Mercado Livre.";
+      painel.appendChild(alerta);
+    }
+
     const rodape = document.createElement("div");
     rodape.className = PREFIXO + "-status";
 
@@ -572,37 +594,6 @@
     dica.textContent = "Passe o mouse sobre um número para ver de onde ele veio.";
     painel.appendChild(dica);
 
-    document.body.appendChild(painel);
-  }
-
-  /**
-   * Painel alternativo para quando nao ha dado nenhum deste anuncio.
-   *
-   * E o caso mais provavel no primeiro uso: a extensao acabou de ser
-   * instalada e ninguem passou ainda pelas telas de vendedor. Em vez de
-   * nao mostrar nada (que parece extensao quebrada), explicamos o que
-   * fazer para os dados aparecerem.
-   */
-  function montarPainelVazio() {
-    const anterior = document.getElementById(PREFIXO + "-painel");
-    if (anterior) anterior.remove();
-
-    const painel = document.createElement("div");
-    painel.id = PREFIXO + "-painel";
-
-    const titulo = document.createElement("div");
-    titulo.className = PREFIXO + "-titulo";
-    titulo.textContent = "ML Metrics";
-
-    const aviso = document.createElement("div");
-    aviso.className = PREFIXO + "-status";
-    aviso.textContent =
-      "Sem dados deste anúncio ainda. Abra \"Minhas publicações\" " +
-      "uma vez para a extensão capturar as métricas.";
-
-    painel.appendChild(criarBotaoFechar(painel));
-    painel.appendChild(titulo);
-    painel.appendChild(aviso);
     document.body.appendChild(painel);
   }
 
@@ -651,15 +642,15 @@
         const escolha = escolherRegistro(chaveNoInicio.split("|"), cache);
 
         if (!escolha) {
-          // Sem dado conferivel deste anuncio. Um painel com numeros que
-          // ainda esteja na tela sai - e o que acontece logo depois de
-          // "Limpar dados guardados", quando o cache inteiro some.
+          // Sem dado conferivel deste anuncio: nenhum painel. Um painel com
+          // numeros que ainda esteja na tela sai - e o que acontece logo
+          // depois de "Limpar dados guardados", quando o cache inteiro some.
+          //
+          // Nao existe mais o painel "Sem dados" (#46). Ele aparecia em TODO
+          // anuncio aberto - inclusive de outros vendedores, que nunca vao ter
+          // dado - com uma instrucao que nao resolvia nada. A dica de abrir
+          // "Minhas publicacoes" ficou no popup.
           removerPainel();
-
-          // So mostramos o painel vazio quando HA outros anuncios capturados.
-          // Se o cache esta vazio, a pessoa provavelmente esta navegando como
-          // compradora - o painel so faria ruido sobre todo produto que abrir.
-          if (Object.keys(cache).length > 0) montarPainelVazio();
           return;
         }
 

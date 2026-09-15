@@ -40,6 +40,8 @@ const path = require("path");
 
 const CAMINHO_COLETOR = path.join(__dirname, "..", "src", "coletor.js");
 const CAMINHO_CONTENT = path.join(__dirname, "..", "src", "content.js");
+const CAMINHO_GRAVACAO = path.join(__dirname, "..", "src", "gravacao.js");
+const CAMINHO_BACKGROUND = path.join(__dirname, "..", "src", "background.js");
 const fonte = fs.readFileSync(CAMINHO_COLETOR, "utf8");
 const fonteContent = fs.readFileSync(CAMINHO_CONTENT, "utf8");
 
@@ -207,14 +209,14 @@ const blocoFuncoes = [
   "contextoDoAnuncio",
   "valorDoRotulo",
   "trechoDaLeitura",
-  "descartarImplausiveis",
+  "anotarImplausiveis",
   "varrerPagina",
   "caminhoMascarado",
-  "mudou",
-  "faltaOrigem",
-  "mesclarOrigem",
   "contextoDoTexto",
-  "resumirRecusas"
+  "resumirRecusas",
+  "ehTextoDePeriodo",
+  "estadoDoControle",
+  "coletarTextosDePeriodo"
 ].map(function (nome) { return extrairFuncao(fonte, nome); }).join("\n");
 
 // O calculo e a escolha do registro do painel moram no content.js - tambem
@@ -233,7 +235,8 @@ const blocoFuncaoContent = [
 const blocoConstantes = [
   extrairConstObj(fonte, "ROTULOS"),
   extrairConstRegex(fonte, "PADRAO_CODIGO"),
-  extrairConstValor(fonte, "MAX_NIVEIS")
+  extrairConstValor(fonte, "MAX_NIVEIS"),
+  extrairConstValor(fonte, "LIMITE_TEXTO_POR_NIVEL")
 ].join("\n");
 
 // Em strict mode o eval tem escopo proprio: function e const nao vazam para
@@ -249,20 +252,20 @@ const codigoAvaliado = blocoConstantes + "\n" + blocoFuncoes + "\n" +
   "  pecasDoTexto: pecasDoTexto," +
   "  motivoDoNumero: motivoDoNumero," +
   "  resumirRecusas: resumirRecusas," +
+  "  ehTextoDePeriodo: ehTextoDePeriodo," +
+  "  coletarTextosDePeriodo: coletarTextosDePeriodo," +
   "  temLetra: temLetra," +
   "  ehData: ehData," +
   "  seguidoDeUnidade: seguidoDeUnidade," +
   "  caminhoMascarado: caminhoMascarado," +
-  "  mudou: mudou," +
-  "  faltaOrigem: faltaOrigem," +
-  "  mesclarOrigem: mesclarOrigem," +
+  "  LIMITE_TEXTO_POR_NIVEL: LIMITE_TEXTO_POR_NIVEL," +
   "  ehPaginaDeCompra: ehPaginaDeCompra," +
   "  aceitarNoDeTextoTecnico: aceitarNoDeTextoTecnico," +
   "  paginaMencionaVisita: paginaMencionaVisita," +
   "  codigosDentroDe: codigosDentroDe," +
   "  contextoDoAnuncio: contextoDoAnuncio," +
   "  valorDoRotulo: valorDoRotulo," +
-  "  descartarImplausiveis: descartarImplausiveis," +
+  "  anotarImplausiveis: anotarImplausiveis," +
   "  varrerPagina: varrerPagina," +
   "  ROTULOS: ROTULOS," +
   "  PADRAO_CODIGO: PADRAO_CODIGO," +
@@ -290,17 +293,26 @@ const {
   ehData,
   seguidoDeUnidade,
   caminhoMascarado,
-  mudou,
-  faltaOrigem,
-  mesclarOrigem,
+  LIMITE_TEXTO_POR_NIVEL,
+  valorDoRotulo,
   lerRotulo,
   resumirRecusas,
+  ehTextoDePeriodo,
+  coletarTextosDePeriodo,
   ehPaginaDeCompra,
   paginaMencionaVisita,
   varrerPagina,
   ROTULOS,
   PADRAO_CODIGO
 } = exportados;
+
+// A regra de gravacao (gravacao.js) nao e IIFE escondida: define a variavel
+// MLMetricsGravacao. new Function roda o arquivo num escopo proprio e devolve
+// essa variavel.
+const MLMetricsGravacao = new Function(
+  fs.readFileSync(CAMINHO_GRAVACAO, "utf8") + "\nreturn MLMetricsGravacao;"
+)();
+const { mudou, faltaOrigem, mesclarOrigem } = MLMetricsGravacao;
 const {
   calcular,
   somenteComOrigem,
@@ -822,6 +834,97 @@ testar("titulo de produto some, tipo de codigo fica", "/(titulo)/up/MLBU#", cami
 testar("rota de ate 3 palavras fica", "/publicaciones-y-ventas", caminhoMascarado("/publicaciones-y-ventas"));
 
 console.log("");
+console.log("=== #47 - textos de periodo no diagnostico ===");
+[
+  "Últimos 30 dias",
+  "Visitas nos ultimos 30 dias",
+  "últimas 24 horas",
+  "Último mês",
+  "Últimos 12 meses",
+  "30 dias",
+  "7d",
+  "Hoje",
+  "Vendas desde ontem",
+  "Este mês",
+  "Mês passado",
+  "Período",
+  "Desde o início",
+  "01/08/2026 - 30/08/2026",
+  "16 ago. - 14 set.",
+  "1 de agosto a 30 de agosto"
+].forEach(function (texto) {
+  testar("periodo: reconhece '" + texto + "'", true, ehTextoDePeriodo(texto));
+});
+
+// Prazo, entrega, data solta e rotulo de metrica nao sao filtro de periodo.
+[
+  "Chega em 2 dias",
+  "Anuncio pausado ha 12 dias.",
+  "Chega hoje",
+  "359 visitas totais",
+  "Estoque: 12 unidades",
+  "Venda em 14/09/2026",
+  "Todos",
+  "Mesa Aquecida"
+].forEach(function (texto) {
+  testar("periodo: ignora '" + texto + "'", false, ehTextoDePeriodo(texto));
+});
+
+// Filtro em quatro formatos (botao, abas com aria, lista, campo de datas) e o
+// que NAO pode entrar: painel da extensao, noscript, campo escondido, prazo de
+// entrega, frase longa e o mesmo filtro repetido.
+const opcao7 = elementoDa("option", {}, [textoDa("Últimos 7 dias")]);
+const opcao60 = elementoDa("option", {}, [textoDa("Últimos 60 dias")]);
+opcao60.selected = true;
+const campoDatas = elementoDa("input", { type: "text" }, []);
+campoDatas.value = "01/08/2026 - 30/08/2026";
+const campoEscondido = elementoDa("input", { type: "hidden" }, []);
+campoEscondido.value = "02/08/2026 - 31/08/2026";
+
+const corpoPeriodo = elementoDa("body", {}, [
+  elementoDa("div", { id: "mlmetrics-painel" }, [textoDa("Últimos 45 dias")]),
+  elementoDa("button", {}, [elementoDa("span", {}, [textoDa("Últimos 30 dias")])]),
+  elementoDa("div", {}, [
+    elementoDa("span", { "aria-selected": "false" }, [textoDa("7 dias")]),
+    elementoDa("span", { "aria-selected": "true" }, [textoDa("90 dias")])
+  ]),
+  elementoDa("select", {}, [opcao7, opcao60]),
+  campoDatas,
+  campoEscondido,
+  elementoDa("noscript", {}, [textoDa("Últimos 15 dias")]),
+  elementoDa("section", {}, [
+    elementoDa("span", {}, [textoDa("Últimos 30 dias")]),
+    elementoDa("span", {}, [textoDa("Chega em 2 dias")]),
+    elementoDa("p", {}, [textoDa("Os números desta tela consideram as vendas e as visitas dos últimos 30 dias, sem devoluções.")])
+  ])
+]);
+const periodo = coletarTextosDePeriodo(documentoDa(corpoPeriodo));
+
+testar("periodo: so o filtro, na ordem da tela, com a opcao marcada", JSON.stringify([
+  { onde: "texto", texto: "Últimos 30 dias" },
+  { onde: "texto", texto: "7 dias", marcado: false },
+  { onde: "texto", texto: "90 dias", marcado: true },
+  { onde: "opcao de lista", texto: "Últimos 7 dias", marcado: false },
+  { onde: "opcao de lista", texto: "Últimos 60 dias", marcado: true },
+  { onde: "campo", texto: "01/08/2026 - 30/08/2026" }
+]), JSON.stringify(periodo));
+testar("periodo: filtro repetido entra uma vez", 1,
+  periodo.filter(function (p) { return p.texto === "Últimos 30 dias"; }).length);
+testar("periodo: painel da extensao fica de fora", false,
+  periodo.some(function (p) { return p.texto === "Últimos 45 dias"; }));
+testar("periodo: campo escondido fica de fora", false,
+  periodo.some(function (p) { return /02\/08/.test(p.texto); }));
+testar("periodo: frase longa fica de fora", false,
+  periodo.some(function (p) { return p.texto.length > 80; }));
+
+const muitosPeriodos = [];
+for (let n = 1; n <= 25; n++) {
+  muitosPeriodos.push(elementoDa("span", {}, [textoDa("Últimos " + n + " dias")]));
+}
+testar("periodo: no maximo 20 textos", 20,
+  coletarTextosDePeriodo(documentoDa(elementoDa("body", {}, muitosPeriodos))).length);
+
+console.log("");
 console.log("=== #48 - visita exigida POR ANUNCIO ===");
 // Tela de vendedor com um modulo de terceiro que so mostra vendidos: o card
 // dela (com visitas) passa, o produto alheio (so vendas) nao entra.
@@ -951,19 +1054,231 @@ testar("recusas: sem lista, a varredura nao reclama", 359,
   varrerPagina(documentoDa(corpoRecusas), "https://www.mercadolivre.com.br/anuncios/lista")["MLB3456789012"].visitas);
 
 console.log("");
-if (limitacoes.length > 0) {
-  console.log("=== Limitacoes conhecidas (nao derrubam o teste) ===");
-  limitacoes.forEach(function (l) {
-    const obtido = numeroAntesDe(l[0], l[1]);
-    const emDia = obtido === l[2];
-    console.log((emDia ? "  LIMITACAO ATIVA | " : "  RESOLVIDA? REVISE | ") + l[0] + " -> " + obtido);
-    console.log("  Motivo: " + l[3]);
-  });
+console.log("=== #38 - card com link do item e do catalogo ===");
+const LISTA = "https://www.mercadolivre.com.br/anuncios/lista";
+
+const cardItemCatalogo = elementoDa("section", {}, [
+  elementoDa("a", { href: "https://produto.mercadolivre.com.br/MLB-3456789012-caixa-_JM" }, [
+    textoDa("Caixa organizadora")
+  ]),
+  elementoDa("a", { href: "https://www.mercadolivre.com.br/caixa/p/MLB12345678" }, [
+    textoDa("Ver no catalogo")
+  ]),
+  elementoDa("span", {}, [textoDa("42 visitas")]),
+  elementoDa("span", {}, [textoDa("3 vendas")])
+]);
+const rItemCatalogo = varrerPagina(documentoDa(elementoDa("body", {}, [cardItemCatalogo])), LISTA);
+testar("#38: item + catalogo grava no item (visitas)", 42,
+  rItemCatalogo["MLB3456789012"] ? rItemCatalogo["MLB3456789012"].visitas : "sem registro");
+testar("#38: item + catalogo grava no item (vendas)", 3,
+  rItemCatalogo["MLB3456789012"] ? rItemCatalogo["MLB3456789012"].vendas : "sem registro");
+testar("#38: nada gravado no codigo do catalogo", undefined, rItemCatalogo["MLB12345678"]);
+
+const cardDoisItens = elementoDa("section", {}, [
+  elementoDa("a", { href: "https://produto.mercadolivre.com.br/MLB-1111111111-a" }, [textoDa("A")]),
+  elementoDa("a", { href: "https://produto.mercadolivre.com.br/MLB-2222222222-b" }, [textoDa("B")]),
+  elementoDa("span", {}, [textoDa("42 visitas")])
+]);
+testar("#38: dois itens diferentes no bloco continuam ambiguos", 0,
+  Object.keys(varrerPagina(documentoDa(elementoDa("body", {}, [cardDoisItens])), LISTA)).length);
+
+const cardSoUp = elementoDa("section", {}, [
+  elementoDa("a", { href: "https://www.mercadolivre.com.br/caixa/up/MLBU0000000001" }, [textoDa("Caixa")]),
+  elementoDa("span", {}, [textoDa("42 visitas")])
+]);
+const rSoUp = varrerPagina(documentoDa(elementoDa("body", {}, [cardSoUp])), LISTA);
+testar("#38: so user product: grava no MLBU", 42,
+  rSoUp["MLBU0000000001"] ? rSoUp["MLBU0000000001"].visitas : "sem registro");
+
+console.log("");
+console.log("=== Limite de tamanho por nivel do DOM ===");
+const blocoPequeno = elementoDa("div", {}, [
+  elementoDa("span", {}, [textoDa("359")]),
+  elementoDa("span", {}, [textoDa("visitas")])
+]);
+const blocoGrande = elementoDa("div", {}, [
+  elementoDa("span", {}, [textoDa("359")]),
+  elementoDa("span", {}, [textoDa("visitas")]),
+  elementoDa("p", {}, [textoDa("x".repeat(LIMITE_TEXTO_POR_NIVEL + 100))])
+]);
+const leituraPequena = valorDoRotulo(blocoPequeno.filhos[1], "visita", blocoPequeno, { body: null });
+testar("bloco pequeno: le o numero", 359, leituraPequena ? leituraPequena.valor : null);
+testar("bloco grande demais: para de subir sem ler", null,
+  valorDoRotulo(blocoGrande.filhos[1], "visita", blocoGrande, { body: null }));
+
+console.log("");
+console.log("=== #40 - vendas acima das visitas: mostrar com alerta ===");
+const acima = calcular({ visitas: 5, vendas: 12 }, 10);
+testar("#40: os numeros continuam", 12, acima.vendas);
+testar("#40: marca o alerta", true, acima.vendasAcimaDasVisitas);
+testar("#40: sem taxa de conversao", null, acima.conversao);
+testar("#40: sem 'vende a cada'", null, acima.visitasPorVenda);
+testar("#40: caso normal nao marca alerta", false, calcular({ visitas: 359, vendas: 50 }, 10).vendasAcimaDasVisitas);
+
+const recusasAcima = [];
+const cardAcima = elementoDa("section", {}, [
+  elementoDa("a", { href: "https://produto.mercadolivre.com.br/MLB-3456789012-caixa" }, [textoDa("Caixa")]),
+  elementoDa("span", {}, [textoDa("5 visitas")]),
+  elementoDa("span", {}, [textoDa("12 vendas")])
+]);
+const rAcima = varrerPagina(documentoDa(elementoDa("body", {}, [cardAcima])), LISTA, recusasAcima);
+testar("#40: a varredura nao descarta mais o anuncio", 12,
+  rAcima["MLB3456789012"] ? rAcima["MLB3456789012"].vendas : "descartado");
+testar("#40: o diagnostico anota o aviso", true,
+  recusasAcima.some(function (r) { return /aviso/.test(r.motivo); }));
+
+console.log("");
+console.log("=== gravacao.js - a regra de mesclar no cache ===");
+const T0 = 1000000;
+const origemDe = function (trecho) { return { trecho: trecho, tela: "/anuncios/lista" }; };
+const cacheG = {};
+
+const g1 = MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 359, origem: { visitas: origemDe("a") } } }, T0, false);
+testar("mesclar: anuncio novo conta como mudanca", "MLB1", g1.mudancas.join(","));
+testar("mesclar: carimba a hora no rastro", T0, cacheG.MLB1.origem.visitas.em);
+
+MLMetricsGravacao.mesclar(cacheG, { MLB1: { vendas: 50, origem: { vendas: origemDe("b") } } }, T0 + 1000, false);
+testar("mesclar: tela so com vendas mantem as visitas", 359, cacheG.MLB1.visitas);
+testar("mesclar: e mantem o rastro das visitas", "a", cacheG.MLB1.origem.visitas.trecho);
+
+const g3 = MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 359, origem: { visitas: origemDe("c") } } }, T0 + 2000, false);
+testar("mesclar: mesmo numero logo depois nao grava nada", 0, g3.mudancas.length + g3.renovados.length);
+
+const g4 = MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 359, origem: { visitas: origemDe("d") } } }, T0 + 3 * 60 * 1000, false);
+testar("mesclar: mesmo numero depois de 2 min renova a data", "MLB1", g4.renovados.join(","));
+testar("mesclar: a renovacao aponta o rastro para a leitura nova", "d", cacheG.MLB1.origem.visitas.trecho);
+
+MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 300, origem: { visitas: origemDe("e") } } }, T0 + 4 * 60 * 1000, false);
+testar("mesclar: numero novo menor vence (vale o mais recente)", 300, cacheG.MLB1.visitas);
+
+const cacheAntigo = { MLB2: { visitas: 10, capturadoEm: T0 } };
+const g6 = MLMetricsGravacao.mesclar(cacheAntigo, { MLB2: { visitas: 10, origem: { visitas: origemDe("f") } } }, T0 + 1000, false);
+testar("mesclar: registro antigo sem rastro renova na hora", "MLB2", g6.renovados.join(","));
+testar("mesclar: e ganha o rastro", "f", cacheAntigo.MLB2.origem.visitas.trecho);
+
+// ----------------------------------------------------------------------------
+// Service worker (background.js) - com chrome falso, sem navegador
+// ----------------------------------------------------------------------------
+
+/**
+ * chrome falso para o service worker: storage em memoria com atraso
+ * aleatorio (para que gravacoes simultaneas realmente se cruzem, como no
+ * navegador) e captura do listener de mensagens.
+ */
+function chromeParaServiceWorker() {
+  const armazem = {};
+  let ouvinte = null;
+
+  function copia(valor) {
+    return valor === undefined ? undefined : JSON.parse(JSON.stringify(valor));
+  }
+
+  function atraso() {
+    return Math.floor(Math.random() * 6);
+  }
+
+  return {
+    armazem: armazem,
+    enviar: function (mensagem, remetente) {
+      return new Promise(function (resolve) {
+        ouvinte(mensagem, remetente, resolve);
+      });
+    },
+    runtime: {
+      id: "extensao-teste",
+      lastError: undefined,
+      onMessage: {
+        addListener: function (funcao) { ouvinte = funcao; }
+      }
+    },
+    storage: {
+      local: {
+        get: function (chaves, callback) {
+          const resposta = {};
+          [].concat(chaves).forEach(function (chave) {
+            if (armazem[chave] !== undefined) resposta[chave] = copia(armazem[chave]);
+          });
+          setTimeout(function () { callback(resposta); }, atraso());
+        },
+        set: function (objeto, callback) {
+          setTimeout(function () {
+            Object.keys(objeto).forEach(function (chave) {
+              armazem[chave] = copia(objeto[chave]);
+            });
+            if (callback) callback();
+          }, atraso());
+        }
+      }
+    }
+  };
+}
+
+async function testesDoServiceWorker() {
   console.log("");
+  console.log("=== background.js - gravacao unica para todas as abas (#21) ===");
+
+  const chromeSW = chromeParaServiceWorker();
+  globalThis.chrome = chromeSW;
+  globalThis.importScripts = function (nome) {
+    const codigo = fs.readFileSync(path.join(__dirname, "..", "src", nome), "utf8");
+    globalThis.MLMetricsGravacao = new Function(codigo + "\nreturn MLMetricsGravacao;")();
+  };
+  new Function(fs.readFileSync(CAMINHO_BACKGROUND, "utf8"))();
+
+  const daExtensao = { id: "extensao-teste" };
+
+  // Tres abas gravando AO MESMO TEMPO. Sem a fila unica, as leituras
+  // simultaneas do cache fariam uma gravacao apagar a outra.
+  const respostas = await Promise.all([
+    chromeSW.enviar({ tipo: "salvar", novos: { MLB1: { visitas: 10, origem: { visitas: origemDe("a") } } } }, daExtensao),
+    chromeSW.enviar({ tipo: "salvar", novos: { MLB2: { visitas: 20, origem: { visitas: origemDe("b") } } } }, daExtensao),
+    chromeSW.enviar({ tipo: "salvar", novos: { MLB1: { vendas: 3, origem: { vendas: origemDe("c") } } } }, daExtensao)
+  ]);
+
+  const cache = chromeSW.armazem.mlmetrics_dados || {};
+  testar("SW: tres abas gravando juntas nao apagam nada", "MLB1,MLB2", Object.keys(cache).sort().join(","));
+  testar("SW: o mesmo anuncio junta visitas e vendas de abas diferentes", "10/3",
+    cache.MLB1 ? cache.MLB1.visitas + "/" + cache.MLB1.vendas : "sem registro");
+  testar("SW: responde quantos anuncios mudaram", 1, respostas[0].mudancas);
+
+  const repetida = await chromeSW.enviar(
+    { tipo: "salvar", novos: { MLB2: { visitas: 20, origem: { visitas: origemDe("b") } } } }, daExtensao);
+  testar("SW: leitura repetida nao conta como mudanca (sem aviso verde)", 0, repetida.mudancas);
+
+  const deFora = await chromeSW.enviar({ tipo: "salvar", novos: { MLB9: { visitas: 1 } } }, { id: "outra-extensao" });
+  testar("SW: pedido de fora da extensao e recusado", false, deFora.ok);
+  testar("SW: e nao grava nada", undefined, (chromeSW.armazem.mlmetrics_dados || {}).MLB9);
+
+  const buscaFora = await chromeSW.enviar({ tipo: "buscar", url: "https://example.com/" }, daExtensao);
+  testar("SW: busca fora do dominio do ML e recusada", false, buscaFora.ok);
+
+  const buscaHttp = await chromeSW.enviar({ tipo: "buscar", url: "http://www.mercadolivre.com.br/anuncios" }, daExtensao);
+  testar("SW: busca sem https e recusada", false, buscaHttp.ok);
 }
-console.log("RESUMO: " + passou + "/" + (passou + falhou) + " ok");
-if (falhas.length > 0) {
-  console.log("FALHAS:");
-  falhas.forEach(function (f) { console.log("  - " + f); });
-  process.exitCode = 1;
+
+function imprimirResumo() {
+  console.log("");
+  if (limitacoes.length > 0) {
+    console.log("=== Limitacoes conhecidas (nao derrubam o teste) ===");
+    limitacoes.forEach(function (l) {
+      const obtido = numeroAntesDe(l[0], l[1]);
+      const emDia = obtido === l[2];
+      console.log((emDia ? "  LIMITACAO ATIVA | " : "  RESOLVIDA? REVISE | ") + l[0] + " -> " + obtido);
+      console.log("  Motivo: " + l[3]);
+    });
+    console.log("");
+  }
+  console.log("RESUMO: " + passou + "/" + (passou + falhou) + " ok");
+  if (falhas.length > 0) {
+    console.log("FALHAS:");
+    falhas.forEach(function (f) { console.log("  - " + f); });
+    process.exitCode = 1;
+  }
 }
+
+// Os testes do service worker sao assincronos: o resumo so sai depois deles.
+testesDoServiceWorker().then(imprimirResumo, function (erro) {
+  falhou++;
+  falhas.push("erro nos testes do service worker: " + erro.message);
+  imprimirResumo();
+});

@@ -1,21 +1,31 @@
 // ============================================================================
-// SERVICE WORKER - busca as telas de vendedor para o coletor (Etapa 6)
+// SERVICE WORKER - grava o cache e busca telas para o coletor
 //
-// Por que um service worker para fazer o fetch?
+// Atende dois pedidos das abas, por mensagem:
 //
-// No Manifest V3, fetch de content script e tratado como originado da
-// PAGINA que o hospeda, entao esta sujeito a CORS. Buscar
-// www.mercadolivre.com.br estando numa aba produto.mercadolivre.com.br e
-// bloqueado por CORS de origem cruzada - e com credentials: "include" o
-// servidor precisaria responder Access-Control-Allow-Credentials, o que o
-// ML nao faz. A atualizacao automatica so funcionava por acidente, quando
-// a origem guardada casava exatamente com o subdominio aberto.
+//   "salvar" - grava o que uma aba leu. O service worker e um so para todas
+//              as abas e grava uma leitura de cada vez, entao duas abas do ML
+//              abertas nao apagam o que a outra acabou de gravar (#21). A
+//              regra da mesclagem mora em gravacao.js.
 //
-// No service worker a origem da requisicao e a EXTENSAO, e com
-// host_permissions cobrindo os dominios do ML o CORS deixa de valer.
-// So o fetch mora aqui; o parse do HTML continua no content script, que ja
-// tem toda a heuristica de varrerPagina. O SW so transporta o texto.
+//   "buscar" - busca o HTML de uma tela de vendedor com a sessao dela, para a
+//              atualizacao automatica. Hoje a atualizacao esta DESLIGADA no
+//              coletor.js (BUSCA_AUTOMATICA_LIGADA) e ninguem pede isto - o
+//              atendimento fica pronto para quando for religada.
+//
+// Por que o fetch mora aqui? No Manifest V3, fetch de content script e
+// tratado como originado da PAGINA que o hospeda, entao esta sujeito a CORS.
+// Buscar www.mercadolivre.com.br estando numa aba produto.mercadolivre.com.br
+// e bloqueado - e com credentials: "include" o servidor precisaria responder
+// Access-Control-Allow-Credentials, o que o ML nao faz. No service worker a
+// origem da requisicao e a EXTENSAO, e com host_permissions o CORS deixa de
+// valer. So o fetch mora aqui; o parse do HTML continua no content script.
 // ============================================================================
+
+// A regra da mesclagem (MLMetricsGravacao), compartilhada com as abas.
+importScripts("gravacao.js");
+
+const CHAVE_CACHE = "mlmetrics_dados";
 
 // Quanto esperar por uma tela antes de desistir. Sem limite, um servidor que
 // nunca responde prenderia a busca - e o service worker acordado - ate o
@@ -44,25 +54,73 @@ function enderecoPermitido(url) {
   }
 }
 
-chrome.runtime.onMessage.addListener(function (mensagem, remetente, responder) {
-  if (!mensagem || mensagem.tipo !== "buscar") return false;
+// Fila unica de gravacao. Cada gravacao so comeca quando a anterior terminou:
+// le, mescla e grava sem que outra aba entre no meio. E isso que fecha a
+// corrida entre abas - antes, cada aba tinha a propria fila.
+let filaDeGravacao = Promise.resolve();
 
-  // So a propria extensao pede busca, e so para o dominio do ML. Sem
-  // "externally_connectable" no manifest outras origens nem alcancam este
-  // listener - conferir o id e a segunda tranca, barata, caso o manifest
-  // mude um dia.
-  if (!remetente || remetente.id !== chrome.runtime.id ||
-      !enderecoPermitido(mensagem.url)) {
-    responder({ ok: false });
-    return false;
-  }
+/**
+ * Poe uma gravacao na fila e devolve a resposta para a aba.
+ *
+ * @param {Object} novos o que a varredura leu, por codigo de anuncio
+ * @param {boolean} automatica true quando veio da busca em segundo plano
+ * @returns {Promise<Object>} ok e quantos anuncios mudaram - nunca rejeita
+ */
+function gravarNaFila(novos, automatica) {
+  const tarefa = filaDeGravacao.then(function () {
+    return new Promise(function (resolve) {
+      chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false });
+          return;
+        }
 
+        const cache = guardado[CHAVE_CACHE] || {};
+        let resultado;
+
+        try {
+          resultado = MLMetricsGravacao.mesclar(cache, novos, Date.now(), automatica);
+        } catch (e) {
+          resolve({ ok: false });  // mensagem malformada: nao grava nada
+          return;
+        }
+
+        // Nada mudou nem precisa renovar: nao grava, e a aba nao avisa.
+        if (resultado.mudancas.length === 0 && resultado.renovados.length === 0) {
+          resolve({ ok: true, mudancas: 0 });
+          return;
+        }
+
+        chrome.storage.local.set({ [CHAVE_CACHE]: cache }, function () {
+          if (chrome.runtime.lastError) {
+            resolve({ ok: false });  // quota estourada, por exemplo
+            return;
+          }
+          resolve({ ok: true, mudancas: resultado.mudancas.length });
+        });
+      });
+    });
+  });
+
+  // A fila segue mesmo que alguma coisa de errado aconteca nesta tarefa.
+  filaDeGravacao = tarefa.catch(function () {});
+
+  return tarefa;
+}
+
+/**
+ * Busca uma tela de vendedor e devolve o HTML para a aba.
+ *
+ * @param {string} url endereco ja validado
+ * @param {Function} responder
+ */
+function buscar(url, responder) {
   const controle = new AbortController();
   const relogio = setTimeout(function () {
     controle.abort();
   }, TEMPO_LIMITE_MS);
 
-  fetch(mensagem.url, { credentials: "include", signal: controle.signal })
+  fetch(url, { credentials: "include", signal: controle.signal })
     .then(function (resposta) {
       if (!resposta.ok) throw new Error("resposta " + resposta.status);
 
@@ -86,8 +144,39 @@ chrome.runtime.onMessage.addListener(function (mensagem, remetente, responder) {
     .finally(function () {
       clearTimeout(relogio);
     });
+}
 
-  // Canal assincrono: sem este "true" o Chrome encerra o canal quando o
-  // listener retorna, e a resposta nunca chega ao content script.
-  return true;
+chrome.runtime.onMessage.addListener(function (mensagem, remetente, responder) {
+  if (!mensagem) return false;
+
+  // So a propria extensao conversa com o service worker. Sem
+  // "externally_connectable" no manifest outras origens nem alcancam este
+  // listener - conferir o id e a segunda tranca, barata, caso o manifest
+  // mude um dia.
+  const daExtensao = Boolean(remetente) && remetente.id === chrome.runtime.id;
+
+  if (mensagem.tipo === "salvar") {
+    if (!daExtensao || !mensagem.novos || typeof mensagem.novos !== "object") {
+      responder({ ok: false });
+      return false;
+    }
+
+    gravarNaFila(mensagem.novos, Boolean(mensagem.automatica)).then(responder);
+
+    // Canal assincrono: sem este "true" o Chrome encerra o canal quando o
+    // listener retorna, e a resposta nunca chega a aba.
+    return true;
+  }
+
+  if (mensagem.tipo === "buscar") {
+    if (!daExtensao || !enderecoPermitido(mensagem.url)) {
+      responder({ ok: false });
+      return false;
+    }
+
+    buscar(mensagem.url, responder);
+    return true;  // canal assincrono, mesmo motivo acima
+  }
+
+  return false;
 });
