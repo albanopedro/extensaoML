@@ -275,13 +275,29 @@ feitos justamente para trazê-la e checá-la.
 Formato: `#ID [severidade] título` → onde / causa / evidência / impacto / direção.
 Mantenha estes IDs estáveis: eu vou me referir a eles pelo número.
 
-### Resumo
+### 5.1 Pendências do projeto (funcionalidade — só isto falta em termos de código)
+
+Depois do lote 23a, **só sobram duas coisas de projeto**, e as duas dependem da tela
+real de vendedor (nunca vista — ver "Maior risco aberto" na seção 4):
 
 | # | Sev. | Título | Status | Depende da tela real? | Lote |
 |---|---|---|---|---|---|
-| #47 | MÉDIO | Período (7/30 dias) não é registrado (observer resolvido no lote 21; o período já vem no diagnóstico desde o lote 23a) | ⚠️ parcial | Sim (período) | 23b |
-| #50 | MÉDIO | Privacidade no repositório (resíduo: repo público + histórico) | ⚠️ parcial | Não — decisão do Pedro | — |
+| #47 | MÉDIO | Período (7/30 dias) não é registrado junto do rastro (observer resolvido no lote 21; o período já vem no diagnóstico desde o lote 23a) | ⚠️ parcial | Sim (período) | 23b |
 | — | — | Decisão: religar a busca automática? | ⬜ | Sim (o HTML buscado traz os números?) | — |
+
+Nenhuma das duas tem como avançar sem o `telaAtual.periodo`/`telaAtual` de uma tela de
+vendedor real (via "Copiar diagnóstico" da cliente, ou de uma conta com anúncio, se
+disponível). Não há mais nenhum item de código pendente fora destes dois.
+
+### 5.2 Pendências administrativas (não é código — fora do escopo do projeto em si)
+
+Ficam aqui só para não se perder, mas **não bloqueiam nem dependem de trabalho de
+código**: são decisões e ações do Pedro fora do repositório/extensão em si.
+
+| # | Sev. | Título | Status | Quem resolve |
+|---|---|---|---|---|
+| #50 | MÉDIO | Privacidade no repositório GitHub (resíduo: repo público + histórico) | ⚠️ parcial | Pedro (GitHub) |
+| — | — | Commit do lote 22/23a, verificação manual (9 itens), envio da 0.1.6 à cliente | ⬜ | Pedro |
 
 ---
 
