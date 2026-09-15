@@ -93,7 +93,9 @@ function gravarNaFila(novos, automatica) {
 
         chrome.storage.local.set({ [CHAVE_CACHE]: cache }, function () {
           if (chrome.runtime.lastError) {
-            resolve({ ok: false });  // quota estourada, por exemplo
+            // Quota estourada ou contexto invalidado: nao da para gravar.
+            // A leitura fica so na memoria da aba e some quando ela fechar.
+            resolve({ ok: false, motivo: chrome.runtime.lastError.message });
             return;
           }
           resolve({ ok: true, mudancas: resultado.mudancas.length });

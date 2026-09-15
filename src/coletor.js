@@ -69,6 +69,13 @@
   // Duas horas equilibra dado fresco com nao pesar na navegacao dela.
   const INTERVALO_BUSCA_MS = 2 * 60 * 60 * 1000;
 
+  // Quanto esperar pelo service worker antes de gravar na aba (plano B).
+  // Se o SW morrer no meio da fila ou simplesmente nao responder, a aba
+  // precisa gravar sozinha para nao perder a leitura. Sem esta trava o
+  // plano B so dispara com lastError, e uma resposta que nunca chega
+  // (SW derrubado pelo navegador) deixa a leitura sem ninguem que a grave.
+  const TIMEOUT_PLANO_B_MS = 3000;
+
   // Ultimo diagnostico gravado: de qual tela e quando (trava do
   // salvarDiagnostico, que e por tela - ver la).
   let ultimoDiagnostico = { caminho: null, quando: 0 };
@@ -397,7 +404,16 @@
     const dia = parseInt(m[1], 10);
     const mes = parseInt(m[2], 10);
 
-    return mes >= 1 && mes <= 12 && dia >= 1 && dia <= 31;
+    if (mes < 1 || mes > 12) return false;
+    if (dia < 1) return false;
+
+    // Meses com no maximo 30 dias: abril, junho, setembro, novembro.
+    // Fevereiro aceita 29 (ano bisexto existe) - nao vamos validar bisexto
+    // porque so precisamos distinguir data de metrica, nao validar calendario.
+    const DIAS_MAXIMOS = [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (dia > DIAS_MAXIMOS[mes]) return false;
+
+    return true;
   }
 
   /**
@@ -744,7 +760,12 @@
 
     // Em qual tela a leitura acontece, para o rastro de origem. Mascarado
     // (ver caminhoMascarado): diz a FORMA da rota, sem codigo nem titulo.
-    const tela = caminhoMascarado(new URL(url).pathname);
+    var tela;
+    try {
+      tela = caminhoMascarado(new URL(url).pathname);
+    } catch (e) {
+      tela = "(url invalida)";
+    }
 
     const caminhante = doc.createTreeWalker(
       doc.body,
@@ -971,9 +992,25 @@
         return;
       }
 
+      // Sem resposta do SW em TIMEOUT_PLANO_B_MS: o SW pode ter sido
+      // derrubado pelo navegador no meio da fila. A aba grava sozinha
+      // (plano B) para nao perder a leitura. O timer e cancelado se o SW
+      // responder a tempo - um unico timer por chamada, sem acumulo.
+      let usado = false;
+
+      var timerPlanoB = setTimeout(function () {
+        if (usado) return;
+        usado = true;
+        gravarNestaAba(novos, emSegundoPlano, depoisDeGravar);
+      }, TIMEOUT_PLANO_B_MS);
+
       chrome.runtime.sendMessage(
         { tipo: "salvar", novos: novos, automatica: Boolean(emSegundoPlano) },
         function (resposta) {
+          if (usado) return;
+          usado = true;
+          clearTimeout(timerPlanoB);
+
           // lastError aqui e o service worker que nao respondeu: plano B.
           if (chrome.runtime.lastError || !resposta || !resposta.ok) {
             gravarNestaAba(novos, emSegundoPlano, depoisDeGravar);
@@ -1026,7 +1063,10 @@
               // Ler o lastError evita o aviso "Unchecked runtime.lastError".
               // Quota estourada nao tem o que fazer aqui: avisamos e seguimos.
               if (chrome.runtime.lastError) {
-                console.warn("[ML METRICS] nao consegui gravar o cache");
+                console.warn(
+                  "[ML METRICS] nao consegui gravar o cache: " +
+                  chrome.runtime.lastError.message
+                );
               } else {
                 pronto(resultado.mudancas.length);
               }
@@ -1116,8 +1156,12 @@
    * @returns {boolean}
    */
   function ehPaginaDeCompra(url) {
-    const host = new URL(url).hostname;
-    const path = new URL(url).pathname;
+    try {
+      var host = new URL(url).hostname;
+      var path = new URL(url).pathname;
+    } catch (e) {
+      return false;  // endereco invalido: nao e vitrine
+    }
 
     return host.indexOf("produto.mercadolivre") !== -1 ||
            host.indexOf("articulo.mercadolivre") !== -1 ||
@@ -1180,22 +1224,22 @@
       chrome.storage.local.get([CHAVE_ORIGENS], function (guardado) {
         if (chrome.runtime.lastError) return;  // contexto invalidado
 
-        const origens = guardado[CHAVE_ORIGENS] || [];
-
-        // Ja e a mais recente: nada a fazer, evita gravacao a toa.
-        if (origens[0] === limpa) return;
-
-        const atualizadas = [limpa]
-          .concat(origens.filter(function (u) { return u !== limpa; }))
-          .slice(0, 3);
-
         try {
+          const origens = guardado[CHAVE_ORIGENS] || [];
+
+          // Ja e a mais recente: nada a fazer, evita gravacao a toa.
+          if (origens[0] === limpa) return;
+
+          const atualizadas = [limpa]
+            .concat(origens.filter(function (u) { return u !== limpa; }))
+            .slice(0, 3);
+
           chrome.storage.local.set({ [CHAVE_ORIGENS]: atualizadas }, function () {
             // Ler o lastError evita o aviso "Unchecked runtime.lastError".
             if (chrome.runtime.lastError) return;
           });
         } catch (e) {
-          // contexto invalidado: origens nao sao essenciais, tenta depois
+          // contexto invalidado dentro do callback: origens nao sao essenciais
         }
       });
     } catch (e) {
