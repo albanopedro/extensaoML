@@ -16,11 +16,14 @@
 //   - o que o diagnostico leva de endereco (caminhoMascarado)
 //   - numero preso a outro rotulo (#37) e visita exigida por anuncio (#48)
 //   - o rastro de origem de cada numero e o filtro do painel (so com rastro)
+//   - a fila de numeros e rotulos (valor antes ou depois, ambiguo, motivos)
+//   - o diagnostico das recusas (por que um numero nao virou dado)
+//   - o painel: codigos da pagina, preco estruturado, idade e formato
 //
-// Sem navegador de proposito: o que testamos aqui nao toca em DOM nem em
-// chrome.storage - sao funcoes puras, entao o resultado e deterministico.
-// As partes que dependem do navegador (TreeWalker, MutationObserver) ficam
-// de fora deste teste; sao validas tao somente na pratica, no site real.
+// Sem navegador de proposito: nada aqui toca em chrome.storage, e o DOM
+// entra por um stub fiel das poucas APIs que o coletor usa (mais abaixo).
+// MutationObserver, mensagens e o storage de verdade ficam de fora - esses
+// se testam no navegador (ver "Verificacao manual" no contexto.md).
 //
 // Como rodar (de qualquer pasta do projeto):
 //
@@ -45,31 +48,101 @@ const fonteContent = fs.readFileSync(CAMINHO_CONTENT, "utf8");
 // ----------------------------------------------------------------------------
 
 /**
- * Recorta uma funcao inteira ("function nome... { ... }") do texto-fonte,
- * equilibrando chaves para pegar so o corpo dela.
+ * Acha o "}" que fecha o bloco aberto na posicao "abre", pulando o que nao e
+ * codigo: comentarios, strings e regex literais. Contar chaves as cegas
+ * quebrava a extracao com um "{" dentro de um comentario, de uma string ou
+ * de uma regex.
+ *
+ * @returns {number} posicao do "}" que fecha, ou -1
  */
-function extrairFuncao(fonte, nome) {
-  const inicio = fonte.indexOf("function " + nome);
-  if (inicio === -1) {
-    throw new Error("funcao nao encontrada: " + nome);
-  }
-
-  const abre = fonte.indexOf("{", inicio);
+function fimDoBloco(fonte, abre) {
   let profundidade = 0;
+  let anterior = "";  // ultimo caractere significativo (fora de espaco)
 
   for (let j = abre; j < fonte.length; j++) {
-    if (fonte[j] === "{") profundidade++;
-    else if (fonte[j] === "}") {
-      profundidade--;
-      if (profundidade === 0) return fonte.slice(inicio, j + 1);
+    const c = fonte[j];
+    const seguinte = fonte[j + 1];
+
+    // Comentario de linha.
+    if (c === "/" && seguinte === "/") {
+      j = fonte.indexOf("\n", j);
+      if (j === -1) return -1;
+      continue;
     }
+
+    // Comentario de bloco.
+    if (c === "/" && seguinte === "*") {
+      j = fonte.indexOf("*/", j + 2);
+      if (j === -1) return -1;
+      j++;
+      continue;
+    }
+
+    // String simples, dupla ou template (sem interpolacao com chaves).
+    if (c === "\"" || c === "'" || c === "`") {
+      j++;
+      while (j < fonte.length && fonte[j] !== c) {
+        if (fonte[j] === "\\") j++;
+        j++;
+      }
+      anterior = c;
+      continue;
+    }
+
+    // Regex literal: uma "/" onde comeca uma expressao - depois de "(", "=",
+    // "||", "return"... Depois de nome ou de ")" ela e divisao.
+    const podeSerRegex = (anterior !== "" && "(,=:[!&|?{};".indexOf(anterior) !== -1) ||
+      /\breturn\s*$/.test(fonte.slice(Math.max(0, j - 10), j));
+
+    if (c === "/" && podeSerRegex) {
+      let classe = false;
+      j++;
+      while (j < fonte.length) {
+        if (fonte[j] === "\\") {
+          j += 2;
+          continue;
+        }
+        if (fonte[j] === "[") classe = true;
+        else if (fonte[j] === "]") classe = false;
+        else if (fonte[j] === "/" && !classe) break;
+        j++;
+      }
+      anterior = "/";
+      continue;
+    }
+
+    if (c === "{") {
+      profundidade++;
+    } else if (c === "}") {
+      profundidade--;
+      if (profundidade === 0) return j;
+    }
+
+    if (!/\s/.test(c)) anterior = c;
   }
 
-  throw new Error("funcao nao fechada: " + nome);
+  return -1;
 }
 
 /**
- * Recorta uma constante "const NOME = { ... };" equilibrando as chaves.
+ * Recorta uma funcao inteira ("function nome(...) { ... }") do texto-fonte.
+ * Procura "function nome(" - com o parentese - para "calcular" nao casar
+ * com uma "calcularOutraCoisa" que venha antes.
+ */
+function extrairFuncao(fonte, nome) {
+  const achado = new RegExp("function " + nome + "\\s*\\(").exec(fonte);
+  if (!achado) {
+    throw new Error("funcao nao encontrada: " + nome);
+  }
+
+  const fim = fimDoBloco(fonte, fonte.indexOf("{", achado.index));
+  if (fim === -1) throw new Error("funcao nao fechada: " + nome);
+
+  return fonte.slice(achado.index, fim + 1);
+}
+
+/**
+ * Recorta uma constante "const NOME = { ... };".
  */
 function extrairConstObj(fonte, nome) {
   const inicio = fonte.indexOf("const " + nome + " = {");
@@ -77,18 +150,10 @@ function extrairConstObj(fonte, nome) {
     throw new Error("constante nao encontrada: " + nome);
   }
 
-  const abre = fonte.indexOf("{", inicio);
-  let profundidade = 0;
+  const fim = fimDoBloco(fonte, fonte.indexOf("{", inicio));
+  if (fim === -1) throw new Error("constante nao fechada: " + nome);
 
-  for (let j = abre; j < fonte.length; j++) {
-    if (fonte[j] === "{") profundidade++;
-    else if (fonte[j] === "}") {
-      profundidade--;
-      if (profundidade === 0) return fonte.slice(inicio, j + 1);
-    }
-  }
-
-  throw new Error("constante nao fechada: " + nome);
+  return fonte.slice(inicio, fim + 1);
 }
 
 /**
@@ -129,13 +194,12 @@ const blocoFuncoes = [
   "paraInteiro",
   "numeroAntesDe",
   "lerRotulo",
-  "numeroPresoAOutroRotulo",
-  "ultimoNumeroColado",
-  "primeiroNumeroColado",
+  "pecasDoTexto",
+  "pecasColadas",
+  "motivoDoNumero",
   "temLetra",
   "ehData",
   "seguidoDeUnidade",
-  "ehAnoPosDesde",
   "ehPaginaDeCompra",
   "aceitarNoDeTextoTecnico",
   "paginaMencionaVisita",
@@ -148,13 +212,22 @@ const blocoFuncoes = [
   "caminhoMascarado",
   "mudou",
   "faltaOrigem",
-  "mesclarOrigem"
+  "mesclarOrigem",
+  "contextoDoTexto",
+  "resumirRecusas"
 ].map(function (nome) { return extrairFuncao(fonte, nome); }).join("\n");
 
-// O calculo do painel mora no content.js - tambem funcao pura.
+// O calculo e a escolha do registro do painel moram no content.js - tambem
+// funcoes puras.
 const blocoFuncaoContent = [
+  extrairConstRegex(fonteContent, "PADRAO_CODIGO"),
   extrairFuncao(fonteContent, "calcular"),
-  extrairFuncao(fonteContent, "somenteComOrigem")
+  extrairFuncao(fonteContent, "somenteComOrigem"),
+  extrairFuncao(fonteContent, "escolherRegistro"),
+  extrairFuncao(fonteContent, "codigosDaPagina"),
+  extrairFuncao(fonteContent, "precoDoJsonLd"),
+  extrairFuncao(fonteContent, "diasDesde"),
+  extrairFuncao(fonteContent, "formatarPercentual")
 ].join("\n");
 
 const blocoConstantes = [
@@ -172,11 +245,12 @@ const codigoAvaliado = blocoConstantes + "\n" + blocoFuncoes + "\n" +
   "exportados = {" +
   "  paraInteiro: paraInteiro," +
   "  numeroAntesDe: numeroAntesDe," +
-  "  ultimoNumeroColado: ultimoNumeroColado," +
-  "  primeiroNumeroColado: primeiroNumeroColado," +
+  "  lerRotulo: lerRotulo," +
+  "  pecasDoTexto: pecasDoTexto," +
+  "  motivoDoNumero: motivoDoNumero," +
+  "  resumirRecusas: resumirRecusas," +
   "  temLetra: temLetra," +
   "  ehData: ehData," +
-  "  ehAnoPosDesde: ehAnoPosDesde," +
   "  seguidoDeUnidade: seguidoDeUnidade," +
   "  caminhoMascarado: caminhoMascarado," +
   "  mudou: mudou," +
@@ -197,10 +271,18 @@ const codigoAvaliado = blocoConstantes + "\n" + blocoFuncoes + "\n" +
 
 eval(codigoAvaliado);
 
-// O content.js tambem e IIFE; mesmo truque para o calcular.
+// O content.js tambem e IIFE; mesmo truque para as funcoes dele.
 let exportadosContent;
 eval(blocoFuncaoContent + "\n" +
-  "exportadosContent = { calcular: calcular, somenteComOrigem: somenteComOrigem };");
+  "exportadosContent = {" +
+  "  calcular: calcular," +
+  "  somenteComOrigem: somenteComOrigem," +
+  "  escolherRegistro: escolherRegistro," +
+  "  codigosDaPagina: codigosDaPagina," +
+  "  precoDoJsonLd: precoDoJsonLd," +
+  "  diasDesde: diasDesde," +
+  "  formatarPercentual: formatarPercentual" +
+  "};");
 
 const {
   numeroAntesDe,
@@ -211,15 +293,23 @@ const {
   mudou,
   faltaOrigem,
   mesclarOrigem,
-  ultimoNumeroColado,
-  primeiroNumeroColado,
+  lerRotulo,
+  resumirRecusas,
   ehPaginaDeCompra,
   paginaMencionaVisita,
   varrerPagina,
   ROTULOS,
   PADRAO_CODIGO
 } = exportados;
-const { calcular, somenteComOrigem } = exportadosContent;
+const {
+  calcular,
+  somenteComOrigem,
+  escolherRegistro,
+  codigosDaPagina,
+  precoDoJsonLd,
+  diasDesde,
+  formatarPercentual
+} = exportadosContent;
 
 // ----------------------------------------------------------------------------
 // Harness de teste
@@ -298,7 +388,8 @@ testar("caso 6: prosa nao vira metrica", null, numeroAntesDe("Anuncio pausado ha
 
 // fixture MLB-1111111111-anuncio.html.
 testar("anuncio: 'Novo | 1 vendido'", 1, numeroAntesDe("Novo | 1 vendido", "vendido"));
-testar("anuncio: '+1.000 vendas' (reputacao)", 1000, numeroAntesDe("+1.000 vendas", "venda"));
+// A reputacao do vendedor e faixa arredondada ("+1.000"): nunca e contagem.
+testar("anuncio: '+1.000 vendas' (reputacao) nao vira metrica", null, numeroAntesDe("+1.000 vendas", "venda"));
 
 console.log("");
 console.log("=== #41 - o que vem DEPOIS do numero ===");
@@ -320,19 +411,33 @@ testar("seguidoDeUnidade(' dias')", true, seguidoDeUnidade(" dias"));
 testar("seguidoDeUnidade(' meses')", true, seguidoDeUnidade(" meses"));
 
 console.log("");
-console.log("=== #37 - numero preso a outro rotulo ===");
-// Layout "Rotulo: valor": o numero logo antes de "Vendas" e das visitas.
+console.log("=== #37 - de qual rotulo e o numero (fila de pecas) ===");
+// Valor DEPOIS do rotulo ("Rotulo: valor").
 testar("'Visitas: 359 | Vendas: 12' -> vendas 12", 12, numeroAntesDe("Visitas: 359 | Vendas: 12", "venda"));
 testar("'Visitas: 359 | Vendas: 12' -> visitas 359", 359, numeroAntesDe("Visitas: 359 | Vendas: 12", "visita"));
 testar("'Vendas: 12 Visitas: 359' -> visitas 359", 359, numeroAntesDe("Vendas: 12 Visitas: 359", "visita"));
 testar("'Visitas totais: 359 | Vendas: 12' -> vendas 12", 12, numeroAntesDe("Visitas totais: 359 | Vendas: 12", "venda"));
+testar("'Visitas totais: 359 | Vendas: 12' -> visitas 359 (qualificador)", 359, numeroAntesDe("Visitas totais: 359 | Vendas: 12", "visita"));
 testar("'Estoque: 12 | Vendas: 3' -> vendas 3", 3, numeroAntesDe("Estoque: 12 | Vendas: 3", "venda"));
 testar("'Estoque: 12 | Vendas' (sem numero de vendas) -> nada", null, numeroAntesDe("Estoque: 12 | Vendas", "venda"));
-// Custo aceito: texto corrido com numero entre dois rotulos fica sem leitura.
-testar("'359 visitas 12 vendas' -> vendas nada (ambiguo)", null, numeroAntesDe("359 visitas 12 vendas", "venda"));
+// Valor ANTES do rotulo, em texto corrido. A 0.1.3 perdia as vendas no
+// primeiro caso e gravava 5 vendas no segundo.
+testar("'359 visitas 12 vendas' -> vendas 12", 12, numeroAntesDe("359 visitas 12 vendas", "venda"));
 testar("'359 visitas 12 vendas' -> visitas 359", 359, numeroAntesDe("359 visitas 12 vendas", "visita"));
-// Palavra comum antes do numero nao e dona dele.
+testar("'359 visitas 12 vendas 5 disponiveis' -> vendas 12 (nao 5)", 12, numeroAntesDe("359 visitas 12 vendas 5 disponiveis", "venda"));
+testar("'15 visitas hoje 4.200 visitas totais' -> 4200", 4200, numeroAntesDe("15 visitas hoje 4.200 visitas totais", "visita"));
+// Ambiguo nao vira leitura: um titulo terminado em numero antes das metricas.
+testar("'Tamanho 42 Visitas 359 Vendas 12' -> visitas nada (ambiguo)", null, numeroAntesDe("Tamanho 42 Visitas 359 Vendas 12", "visita"));
+testar("'Tamanho 42 Visitas 359 Vendas 12' -> vendas nada (ambiguo)", null, numeroAntesDe("Tamanho 42 Visitas 359 Vendas 12", "venda"));
+// Palavra comum antes do numero nao e dona dele; "revenda" nao e "venda".
 testar("'Kit 2 caixas 359 visitas' -> 359", 359, numeroAntesDe("Kit 2 caixas 359 visitas", "visita"));
+testar("'12 vendas · revenda' -> 12", 12, numeroAntesDe("12 vendas · revenda", "venda"));
+// Numero que nao e contagem, e o motivo que o diagnostico mostra.
+testar("'R$ 49 vendas' (preco inteiro) -> nada", null, numeroAntesDe("R$ 49 vendas", "venda"));
+testar("'+1.000 vendidos' (faixa arredondada) -> nada", null, numeroAntesDe("+1.000 vendidos", "vendido"));
+testar("recusa explica: ambiguo", true, /ambiguo/.test(lerRotulo("Estoque: 12 | Vendas", "venda").recusa));
+testar("recusa explica: preco", "preco", lerRotulo("R$ 49 vendas", "venda").recusa);
+testar("rotulo sem numero nenhum -> null, sem recusa", null, lerRotulo("Vendas", "venda"));
 
 console.log("");
 console.log("=== temLetra (#23) ===");
@@ -354,17 +459,12 @@ testar("milhar grande nao e data", false, ehData("1.299.500"));
 testar("ano solto nao e data", false, ehData("2024"));
 
 console.log("");
-console.log("=== ultimoNumeroColado ===");
-testar("numero colado no fim", 359, ultimoNumeroColado("359 "));
-testar("numero com quebra de linha", 1234, ultimoNumeroColado("1.234\n   "));
-testar("legenda entre numero e fim", null, ultimoNumeroColado("R$ 15.995,00 texto"));
-testar("preco decimal colado", null, ultimoNumeroColado("R$ 15.995,00"));
-
-console.log("");
-console.log("=== primeiroNumeroColado ===");
-testar("numero apos ':'", 359, primeiroNumeroColado(": 359"));
-testar("numero apos espacos", 1, primeiroNumeroColado("  1 vendido"));
-testar("letra entre comeco e numero", null, primeiroNumeroColado("abc 359"));
+console.log("=== lerRotulo - o que conta como colado ===");
+testar("quebra de linha entre numero e rotulo cola", 1234, numeroAntesDe("1.234\n   visitas", "visita"));
+testar("legenda entre numero e rotulo nao cola", null, numeroAntesDe("R$ 15.995,00 Os rotulos 'visitas'", "visita"));
+testar("numero apos ':' cola", 359, numeroAntesDe("Visitas: 359", "visita"));
+testar("espacos antes do numero nao atrapalham", 1, numeroAntesDe("  1 vendido", "vendido"));
+testar("palavra entre rotulo e numero nao cola", null, numeroAntesDe("Visitas abc 359", "visita"));
 
 console.log("");
 console.log("=== PADRAO_CODIGO (formatos MLB) ===");
@@ -429,6 +529,40 @@ testar("0 visitas e 3 vendas: conversao null (nao Infinity)", null, calcular({ v
 const vazio = calcular({}, null);
 testar("sem dados: tudo null", null, vazio.visitas);
 testar("sem dados: vende-a-cada null", null, vazio.visitasPorVenda);
+
+console.log("");
+console.log("=== codigosDaPagina (#38/#54 - o painel acha o anuncio) ===");
+testar("vitrine classica: o item do caminho", "MLB3456789012",
+  codigosDaPagina("https://produto.mercadolivre.com.br/MLB-3456789012-caixa-_JM").join("|"));
+testar("catalogo: item do pdp_filters antes do catalogo", "MLB3456789012|MLB19655437",
+  codigosDaPagina("https://www.mercadolivre.com.br/caixa/p/MLB19655437?pdp_filters=item_id:MLB3456789012").join("|"));
+testar("estrutura nova: wid depois do # antes do MLBU", "MLB3456789012|MLBU0000000001",
+  codigosDaPagina("https://www.mercadolivre.com.br/caixa/up/MLBU0000000001#wid=MLB3456789012&sid=unico").join("|"));
+testar("tela de vendedor com ?search=MLB: nenhum codigo", "",
+  codigosDaPagina("https://www.mercadolivre.com.br/anuncios/lista?search=MLB3456789012").join("|"));
+testar("endereco invalido nao quebra", "", codigosDaPagina("nao e url").join("|"));
+
+const cacheCandidatos = {
+  MLB19655437: { vendas: 1000 },
+  MLB3456789012: { visitas: 359, origem: { visitas: { trecho: "x" } } }
+};
+testar("escolherRegistro pula registro sem rastro", "MLB3456789012",
+  escolherRegistro(["MLB19655437", "MLB3456789012"], cacheCandidatos).codigo);
+testar("escolherRegistro sem nada provado -> null", null,
+  escolherRegistro(["MLB19655437"], cacheCandidatos));
+
+console.log("");
+console.log("=== Painel: preco estruturado, idade e formato ===");
+testar("JSON-LD: preco da oferta", 19.9, precoDoJsonLd('{"@type":"Product","offers":{"price":19.9}}'));
+testar("JSON-LD: lista com @graph e preco em texto", 49.9,
+  precoDoJsonLd('[{"@graph":[{"@type":"Product","offers":[{"price":"49.90"}]}]}]'));
+testar("JSON-LD: sem oferta -> null", null, precoDoJsonLd('{"@type":"BreadcrumbList"}'));
+testar("JSON-LD: malformado -> null", null, precoDoJsonLd("nao e json"));
+testar("idade: ontem a noite nao e 'hoje'", 1,
+  diasDesde(new Date(2026, 8, 13, 23, 30).getTime(), new Date(2026, 8, 14, 0, 30).getTime()));
+testar("idade: mesmo dia e 0", 0,
+  diasDesde(new Date(2026, 8, 14, 0, 10).getTime(), new Date(2026, 8, 14, 23, 50).getTime()));
+testar("percentual com virgula, como no ML", "13,9%", formatarPercentual(13.93));
 
 console.log("");
 console.log("=== varrerPagina (#36 - so tela de vendedor entrega numeros) ===");
@@ -757,6 +891,64 @@ testar("painel: numero com rastro entra", 359, soVisitasProvadas.visitas);
 testar("painel: numero sem rastro nao entra", undefined, soVisitasProvadas.vendas);
 testar("painel: registro de versao antiga nao mostra nada", undefined, somenteComOrigem({ visitas: 359, vendas: 12 }).visitas);
 testar("painel: sem registro nao quebra", undefined, somenteComOrigem(undefined).visitas);
+
+console.log("");
+console.log("=== Numero antes do rotulo, em elementos irmaos ===");
+// <span>359</span><span>visitas</span><span>12</span><span>vendas</span> no
+// mesmo bloco: o textContent vira "359visitas12vendas". A 0.1.3 perdia as
+// vendas aqui ("numero entre dois rotulos"); a fila de pecas resolve.
+const cardIrmaos = elementoDa("section", {}, [
+  elementoDa("a", { href: "https://www.mercadolivre.com.br/itm/MLB-3456789012-caixa/MLB3456789012" }, [
+    textoDa("Caixa organizadora")
+  ]),
+  elementoDa("div", {}, [
+    elementoDa("span", {}, [textoDa("359")]),
+    elementoDa("span", {}, [textoDa("visitas")]),
+    elementoDa("span", {}, [textoDa("12")]),
+    elementoDa("span", {}, [textoDa("vendas")])
+  ])
+]);
+const rIrmaos = varrerPagina(
+  documentoDa(elementoDa("body", {}, [cardIrmaos])),
+  "https://www.mercadolivre.com.br/anuncios/lista"
+);
+testar("irmaos: visitas 359", 359, rIrmaos["MLB3456789012"].visitas);
+testar("irmaos: vendas 12", 12, rIrmaos["MLB3456789012"].vendas);
+
+console.log("");
+console.log("=== Diagnostico: por que um numero nao virou dado ===");
+const recusas = [];
+const corpoRecusas = elementoDa("body", {}, [
+  elementoDa("section", {}, [
+    elementoDa("a", { href: "https://www.mercadolivre.com.br/itm/MLB-3456789012-caixa/MLB3456789012" }, [
+      textoDa("Caixa organizadora")
+    ]),
+    elementoDa("span", {}, [textoDa("359 visitas")]),
+    elementoDa("span", {}, [textoDa("Estoque: 5 | Vendas")])
+  ]),
+  // Bloco com dois anuncios: nao da para saber de qual e o rotulo.
+  elementoDa("section", {}, [
+    elementoDa("a", { href: "https://www.mercadolivre.com.br/itm/MLB-1111111111-a/MLB1111111111" }, [
+      textoDa("Anuncio A")
+    ]),
+    elementoDa("a", { href: "https://www.mercadolivre.com.br/itm/MLB-2222222222-b/MLB2222222222" }, [
+      textoDa("Anuncio B")
+    ]),
+    elementoDa("span", {}, [textoDa("Vendas: 7")])
+  ])
+]);
+const rRecusas = varrerPagina(
+  documentoDa(corpoRecusas),
+  "https://www.mercadolivre.com.br/anuncios/lista",
+  recusas
+);
+const motivos = recusas.map(function (r) { return r.motivo; }).join(" | ");
+testar("recusas: a leitura valida continua", 359, rRecusas["MLB3456789012"].visitas);
+testar("recusas: vendas ambiguas aparecem com motivo", true, /ambiguo/.test(motivos));
+testar("recusas: bloco com varios anuncios aparece com motivo", true, /bloco com 2 anuncios/.test(motivos));
+testar("recusas: resumo agrupa por motivo", true, Object.keys(resumirRecusas(recusas)).length >= 2);
+testar("recusas: sem lista, a varredura nao reclama", 359,
+  varrerPagina(documentoDa(corpoRecusas), "https://www.mercadolivre.com.br/anuncios/lista")["MLB3456789012"].visitas);
 
 console.log("");
 if (limitacoes.length > 0) {

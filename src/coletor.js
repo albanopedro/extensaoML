@@ -99,226 +99,257 @@
   }
 
   /**
-   * Pega o numero que aparece ANTES de uma palavra no texto.
+   * Valor de um rotulo no texto: "359 visitas" -> 359, "Visitas: 359" -> 359.
    *
-   * Por que "antes" e nao simplesmente "o primeiro numero"?
-   * Porque em portugues o valor precede o rotulo, enquanto numeros que vem
-   * DEPOIS do rotulo costumam descrever o recorte, nao o valor:
-   *
-   *   "359 visitas totais"              -> 359 e o valor        (antes)
-   *   "Visitas nos ultimos 30 dias"     -> 30 e o periodo!      (depois)
-   *
-   * Pegar o primeiro numero do texto capturaria 30 no segundo caso, que
-   * esta errado. Exigir que venha antes elimina essa classe de engano.
-   *
-   * Quando ha varios numeros antes, ficamos com o ULTIMO - e o mais
-   * proximo do rotulo, entao o mais provavel de ser o valor dele.
-   *
-   * Procuramos a ULTIMA ocorrencia do rotulo, nao a primeira. Telas de
-   * vendedor repetem o mesmo rotulo em recortes lado a lado ("visitas
-   * hoje" e "visitas totais"); a ultima costuma ser o total, que e o que
-   * interessa. E com duas varreduras competindo, a regra do "maior valor"
-   * em varrerPagina() decide - aproveitando o que ela ja sabe fazer.
+   * O nome e historico - a primeira versao so olhava o numero ANTES do
+   * rotulo. Hoje quem decide e lerRotulo, que explica as regras; aqui fica
+   * so o numero, ou null quando nao ha leitura segura.
    *
    * @param {string} texto
    * @param {string} palavra rotulo procurado, em minusculo
    * @returns {number|null}
    */
   function numeroAntesDe(texto, palavra) {
-    // A leitura mora em lerRotulo, que tambem diz ONDE o numero estava no
-    // texto (para o rastro de origem). Aqui fica so o numero.
     const leitura = lerRotulo(texto, palavra);
-    return leitura ? leitura.valor : null;
+    return (leitura && leitura.valor !== undefined) ? leitura.valor : null;
   }
 
   /**
-   * Faz a leitura descrita em numeroAntesDe e devolve tambem a POSICAO dela
-   * no texto: de onde ate onde vai o pedaco "numero + rotulo" que virou dado.
+   * Le o valor de um rotulo olhando a FILA de numeros e rotulos em volta dele.
    *
-   * A posicao existe para o rastro de origem (ver trechoDaLeitura). Cada
-   * numero guardado leva junto o texto exato de onde saiu, e e isso que
-   * permite conferir o painel contra a tela do Mercado Livre.
+   * O ML pode escrever o valor antes ou depois do rotulo, e quando varias
+   * metricas ficam lado a lado o mesmo numero fica ENTRE dois rotulos:
+   *
+   *   "359 visitas 12 vendas"       -> valor antes do rotulo  (12 e das vendas)
+   *   "Visitas: 359 | Vendas: 12"   -> valor depois do rotulo (359 e das visitas)
+   *
+   * Olhar so o vizinho imediato erra um dos dois formatos - e erra com numero
+   * plausivel: "359 visitas 12 vendas 5 disponiveis" dava 5 vendas. Por isso
+   * montamos a fila de pecas COLADAS em volta do rotulo (numero, rotulo,
+   * numero, rotulo...; colado = entre uma peca e a outra so espaco e
+   * pontuacao, nunca palavra) e deixamos as PONTAS da fila dizerem o formato:
+   *
+   *   comeca com numero e termina com rotulo   -> valor antes    (N R N R)
+   *   comeca com rotulo e termina com numero   -> valor depois   (R N R N)
+   *   comeca e termina com numero              -> ambiguo        (N R N)
+   *   comeca e termina com rotulo              -> ambiguo        (R N R)
+   *
+   * Ambiguo nao vira leitura: na duvida, nao mostramos. O mesmo vale quando o
+   * numero escolhido nao e contagem - decimal, data, hora, percentual,
+   * periodo, preco, ano, faixa "+1.000" (ver motivoDoNumero).
+   *
+   * Entre varias ocorrencias do rotulo vale a ULTIMA que comeca uma palavra:
+   * telas repetem o rotulo em recortes ("visitas hoje", "visitas totais") e a
+   * ultima costuma ser o total. "revenda" nao conta como "venda".
+   *
+   * A posicao devolvida (inicio e fim) alimenta o rastro de origem (ver
+   * trechoDaLeitura) e o diagnostico das recusas.
    *
    * @param {string} texto
    * @param {string} palavra rotulo procurado, em minusculo
-   * @returns {Object|null} valor, inicio e fim da leitura - ou null
+   * @returns {Object|null} valor, inicio e fim quando ha leitura; recusa,
+   *                        inicio e fim quando ha numero mas ele nao pode ser
+   *                        usado; null quando nada esta colado no rotulo
    */
   function lerRotulo(texto, palavra) {
     if (!texto) return null;
 
-    const posicao = texto.toLowerCase().lastIndexOf(palavra);
-    if (posicao === -1) return null;
+    const pecas = pecasDoTexto(texto);
 
-    // Fim do rotulo INTEIRO: o rotulo procurado e "visita", mas o texto diz
-    // "visitas". As letras que sobram fazem parte da palavra - nao podem ser
-    // lidas como palavra estranha antes do numero, e o rastro deve mostrar
-    // "visitas" inteiro.
-    const sobraDaPalavra = texto
-      .slice(posicao + palavra.length)
-      .match(/^[a-zA-Z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF]*/)[0];
-    const fimDoRotulo = posicao + palavra.length + sobraDaPalavra.length;
-
-    // Primeiro tentamos antes do rotulo, que e a ordem natural em portugues.
-    const trechoAntes = texto.slice(0, posicao);
-    const antes = ultimoNumeroColado(trechoAntes);
-
-    if (antes !== null) {
-      // Um ANO solto nao e metrica: "Ativo desde 2024 vendas" nao tem valor
-      // nenhum, o 2024 e a data em que o anuncio foi ativado. Rejeitamos
-      // apenas quando a palavra "desde" aparece imediatamente antes do
-      // numero - e ela que denuncia o contexto de tempo. Sem o "desde",
-      // "2024 vendas" pode ser metrica legitima (ele vendeu 2024 vezes) e
-      // nao pode ser bloqueado pelo tamanho do numero.
-      if (ehAnoPosDesde(trechoAntes, antes)) return null;
-
-      // O numero colado ANTES pode ser de OUTRO rotulo. Em "Visitas: 359 |
-      // Vendas: 12", o 359 esta logo antes de "Vendas", mas pertence a
-      // "Visitas". Quando um rotulo conhecido vem antes do numero, ele e o
-      // dono - e a leitura segue para depois do rotulo, onde esta o 12.
-      if (!numeroPresoAOutroRotulo(trechoAntes)) {
-        const numeros = Array.from(trechoAntes.matchAll(/\d[\d.,]*/g));
-        return {
-          valor: antes,
-          inicio: numeros[numeros.length - 1].index,
-          fim: fimDoRotulo
-        };
+    // A ultima peca de rotulo que comeca com a palavra procurada.
+    let indice = -1;
+    for (let i = pecas.length - 1; i >= 0; i--) {
+      if (pecas[i].tipo === "rotulo" && pecas[i].palavra.indexOf(palavra) === 0) {
+        indice = i;
+        break;
       }
     }
+    if (indice === -1) return null;
 
-    // Se nao achou (ou o numero de antes tinha outro dono), tentamos depois
-    // do rotulo - cobre "Visitas: 359".
-    const depois = texto.slice(fimDoRotulo);
-    const valorDepois = primeiroNumeroColado(depois);
-    if (valorDepois === null) return null;
+    // Estende a fila para os dois lados enquanto as pecas se alternam
+    // (numero, rotulo, numero...) e continuam coladas.
+    let primeira = indice;
+    while (primeira > 0 &&
+           pecas[primeira - 1].tipo !== pecas[primeira].tipo &&
+           pecasColadas(texto, pecas[primeira - 1], pecas[primeira])) {
+      primeira--;
+    }
 
-    const achado = depois.match(/\d[\d.,]*/);
-    return {
-      valor: valorDepois,
-      inicio: posicao,
-      fim: fimDoRotulo + achado.index + achado[0].length
-    };
+    let ultima = indice;
+    while (ultima < pecas.length - 1 &&
+           pecas[ultima + 1].tipo !== pecas[ultima].tipo &&
+           pecasColadas(texto, pecas[ultima], pecas[ultima + 1])) {
+      ultima++;
+    }
+
+    // Rotulo sozinho: nenhum numero colado nele neste texto.
+    if (primeira === ultima) return null;
+
+    const comecaComNumero = pecas[primeira].tipo === "numero";
+    const terminaComNumero = pecas[ultima].tipo === "numero";
+
+    if (comecaComNumero === terminaComNumero) {
+      return {
+        recusa: comecaComNumero
+          ? "numero dos dois lados do rotulo (ambiguo)"
+          : "numero entre dois rotulos (ambiguo)",
+        inicio: pecas[primeira].inicio,
+        fim: pecas[ultima].fim
+      };
+    }
+
+    // Fila que comeca com numero: cada rotulo e dono do numero ANTES dele.
+    // Fila que comeca com rotulo: cada rotulo e dono do numero DEPOIS dele.
+    const rotulo = pecas[indice];
+    const numero = comecaComNumero ? pecas[indice - 1] : pecas[indice + 1];
+    const inicio = Math.min(numero.inicio, rotulo.inicio);
+    const fim = Math.max(numero.fim, rotulo.fim);
+
+    if (numero.motivo) {
+      return { recusa: numero.motivo, inicio: inicio, fim: fim };
+    }
+
+    return { valor: numero.valor, inicio: inicio, fim: fim };
   }
 
   /**
-   * Diz se o ultimo numero de um trecho pertence a um rotulo que vem ANTES
-   * dele - e portanto nao pode ser atribuido ao rotulo que vem depois.
+   * Quebra o texto nas pecas que importam para a leitura: NUMEROS e ROTULOS.
    *
-   *   "Visitas: 359 | "      -> 359 e de "Visitas"       preso
-   *   "Estoque 12 - "        -> 12 e do estoque           preso
-   *   "Kit 2 caixas 359 "    -> nenhum rotulo conhecido   livre
+   * Rotulo e toda palavra que COMECA com um rotulo conhecido: as metricas
+   * (ROTULOS) e as quantidades que costumam aparecer ao lado delas nas telas
+   * de vendedor. Sem conhecer "Estoque" como rotulo, o 12 de
+   * "Estoque: 12 | Vendas" pareceria ser das vendas. Logo depois do rotulo
+   * absorvemos ate dois qualificadores ("Visitas totais", "Vendas do mes"),
+   * para que eles nao partam a fila.
    *
-   * Olhamos o pedaco entre o numero anterior (ou o comeco) e este numero,
-   * limitado aos 40 caracteres mais proximos: prosa distante nao conta.
+   * Numero leva junto o motivo de nao ser contagem, quando houver. Mesmo sem
+   * servir, continua sendo peca: um preco colado no rotulo ocupa o lugar do
+   * valor, e o rotulo fica sem leitura - em vez de pular o preco e pegar um
+   * numero mais longe.
    *
-   * O custo e conhecido e aceito. Num texto corrido como "359 visitas 12
-   * vendas", o 12 fica entre dois rotulos e nao da para saber de quem ele e -
-   * entao as vendas ficam sem leitura. Na duvida, nao mostramos: numero que
-   * falta aparece como um traco no painel; numero trocado nao apareceria
-   * como nada, pareceria certo.
-   *
-   * @param {string} trecho texto antes do rotulo, terminando no numero
-   * @returns {boolean}
+   * @param {string} texto
+   * @returns {Object[]} pecas em ordem de posicao
    */
-  function numeroPresoAOutroRotulo(trecho) {
-    const numeros = Array.from(trecho.matchAll(/\d[\d.,]*/g));
-    if (numeros.length === 0) return false;
+  function pecasDoTexto(texto) {
+    const pecas = [];
 
-    const ultimo = numeros[numeros.length - 1];
-    const anterior = numeros.length > 1 ? numeros[numeros.length - 2] : null;
-    const comeco = anterior ? anterior.index + anterior[0].length : 0;
-
-    const pedaco = trecho
-      .slice(Math.max(comeco, ultimo.index - 40), ultimo.index)
-      .toLowerCase();
-
-    // Os rotulos das metricas, mais os de quantidade que aparecem ao lado
-    // delas nas telas de vendedor. Lista fechada: so rotulo que sabemos que
-    // e dono de numero.
     const donos = [].concat(
       ROTULOS.visitas,
       ROTULOS.vendas,
-      ["estoque", "quantidade", "unidade", "dispon"]
+      ["estoque", "dispon", "quantidade", "unidade", "pergunta", "favorit", "avalia", "opini"]
     );
 
-    return donos.some(function (dono) {
-      return pedaco.indexOf(dono) !== -1;
+    // Palavras inteiras, com acento (mesmos intervalos de temLetra).
+    const palavras = /[a-zA-Z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF]+/g;
+
+    // Qualificadores que podem ficar entre o rotulo e o valor.
+    const qualificador = /^\s+(totais|total|hoje|acumulad[ao]s?|brutas?|concretizadas?|realizadas?|[u\u00FA]nic[ao]s|no|na|do|da|per[i\u00ED]odo|m[e\u00EA]s)(?![a-zA-Z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF])/i;
+
+    let achado;
+
+    while ((achado = palavras.exec(texto)) !== null) {
+      const palavra = achado[0].toLowerCase();
+
+      const ehRotulo = donos.some(function (dono) {
+        return palavra.indexOf(dono) === 0;
+      });
+      if (!ehRotulo) continue;
+
+      let fim = achado.index + achado[0].length;
+
+      for (let i = 0; i < 2; i++) {
+        const extra = texto.slice(fim, fim + 40).match(qualificador);
+        if (!extra) break;
+        fim += extra[0].length;
+      }
+
+      pecas.push({ tipo: "rotulo", palavra: palavra, inicio: achado.index, fim: fim });
+
+      // A busca continua depois dos qualificadores ja absorvidos.
+      palavras.lastIndex = fim;
+    }
+
+    // Datas e horas entram como UMA peca ("14/09", "01.02.2023", "14:32"):
+    // sem isso, "01/02/2023" viraria tres numeros colados.
+    const numeros = /\d{1,2}\/\d{1,2}(?:\/\d{2,4})?(?!\d)|\d{1,2}\.\d{1,2}\.\d{4}(?!\d)|\d{1,2}:\d{2}(?!\d)|\d[\d.,]*/g;
+
+    while ((achado = numeros.exec(texto)) !== null) {
+      const inicio = achado.index;
+      const fim = inicio + achado[0].length;
+
+      pecas.push({
+        tipo: "numero",
+        valor: paraInteiro(achado[0]),
+        motivo: motivoDoNumero(texto, inicio, fim),
+        inicio: inicio,
+        fim: fim
+      });
+    }
+
+    return pecas.sort(function (a, b) {
+      return a.inicio - b.inicio;
     });
   }
 
   /**
-   * Ultimo numero de um trecho, DESDE QUE ele esteja colado no fim.
+   * Diz se duas pecas vizinhas estao COLADAS: entre elas so espaco e no
+   * maximo tres sinais (": ", " | ", " - ", " (") - nunca uma palavra.
    *
-   * "Colado" aqui significa: entre o numero e o fim do trecho so pode haver
-   * espaco e pontuacao, nunca letras. E o que separa rotulo de prosa:
-   *
-   *   "359 visitas"                          -> vao " "        vale
-   *   "1.234\n   visitas"                    -> vao branco     vale
-   *   "R$ 15.995,00Os rotulos... 'visitas'"  -> vao com texto  NAO vale
-   *
-   * Sem esta regra, a funcao atravessa frases inteiras atras de um numero
-   * qualquer e cola ele no rotulo errado. Foi assim que uma legenda acabou
-   * virando metrica de anuncio.
-   *
-   * @param {string} trecho
-   * @returns {number|null}
+   * @param {string} texto
+   * @param {Object} a peca da esquerda
+   * @param {Object} b peca da direita
+   * @returns {boolean}
    */
-  function ultimoNumeroColado(trecho) {
-    // matchAll devolve cada ocorrencia COM a posicao onde ela comeca -
-    // e a posicao que permite medir o vao ate o rotulo.
-    //
-    // A regex inclui virgula (\d[\d.,]*) para capturar precos inteiros
-    // (ex: "1.234,56") como um so match, em vez de dividir centavos do
-    // valor. Depois, paraInteiro() rejeita qualquer match que contenha
-    // virgula - centavos nao sao metricas inteiras.
-    const numeros = Array.from(trecho.matchAll(/\d[\d.,]*/g));
-    if (numeros.length === 0) return null;
-
-    const ultimo = numeros[numeros.length - 1];
-    const vao = trecho.slice(ultimo.index + ultimo[0].length);
-
-    if (temLetra(vao)) return null;
-
-    // Percentual nao e contagem: em "+12% visitas" o 12 e variacao, nao
-    // quantidade de visitas. O "%" nao e letra, entao temLetra deixa passar.
-    if (/^\s*%/.test(vao)) return null;
-
-    // O ultimo numero e uma data brasileira? "Publicado em 01.02.2023
-    // visitas" nao tem valor nenhum - rejeitamos o trecho inteiro.
-    if (ehData(ultimo[0])) return null;
-
-    return paraInteiro(ultimo[0]);
+  function pecasColadas(texto, a, b) {
+    const vao = texto.slice(a.fim, b.inicio);
+    if (temLetra(vao)) return false;
+    return vao.replace(/\s+/g, "").length <= 3;
   }
 
   /**
-   * Primeiro numero de um trecho, DESDE QUE colado no comeco.
-   * Mesma regra do anterior, na direcao oposta.
+   * Diz por que um numero NAO e uma contagem - ou null quando e.
    *
-   * @param {string} trecho
-   * @returns {number|null}
+   *   "14/09", "14:32", "01.02.2023"   -> data ou hora
+   *   "26,65"                          -> decimal (preco, media)
+   *   "12%", "30 dias", "12 mil"       -> seguido de unidade
+   *   "R$ 49"                          -> preco
+   *   "+1.000"                         -> faixa arredondada
+   *   "desde 2024"                     -> ano
+   *
+   * So olha uma janela curta em volta do numero: o texto de um nivel do DOM
+   * pode ser grande, e copiar o texto inteiro para cada numero seria caro.
+   *
+   * @param {string} texto o texto inteiro
+   * @param {number} inicio posicao do numero
+   * @param {number} fim posicao logo depois do numero
+   * @returns {string|null}
    */
-  function primeiroNumeroColado(trecho) {
-    // Mesma logica de ultimoNumeroColado: incluimos virgula para capturar
-    // precos como match unico, e paraInteiro rejeita depois.
-    const encontrado = trecho.match(/\d[\d.,]*/);
-    if (!encontrado) return null;
+  function motivoDoNumero(texto, inicio, fim) {
+    const bruto = texto.slice(inicio, fim);
+    const antes = texto.slice(Math.max(0, inicio - 40), inicio);
+    const depois = texto.slice(fim, fim + 40);
 
-    const vao = trecho.slice(0, encontrado.index);
+    if (/[\/:]/.test(bruto) || ehData(bruto)) return "data ou hora";
+    if (bruto.indexOf(",") !== -1) return "decimal (preco ou media)";
+    if (seguidoDeUnidade(depois)) return "seguido de unidade (%, periodo, mil)";
 
-    if (temLetra(vao)) return null;
+    // "R$ 49 vendas": preco inteiro colado no rotulo.
+    if (/R\$\s*$/i.test(antes)) return "preco";
 
-    // O numero e o DIA de uma data? "Visitas 01/02/2023" daria 1 visita
-    // pela leitura normal - rejeitamos o trecho inteiro.
-    const depoisDoNumero = trecho.slice(encontrado.index + encontrado[0].length);
-    if (ehData(encontrado[0] + depoisDoNumero)) return null;
+    // "+1.000 vendidos": faixa arredondada que o ML mostra em pagina publica e
+    // na reputacao do vendedor. Nunca e a contagem exata.
+    if (/\+\s*$/.test(antes)) return "faixa arredondada (+N)";
 
-    // O que vem DEPOIS do numero tambem decide. "Visitas +12%" e variacao,
-    // "Ultima visita 14/09" e data sem ano, "Vendas (30 dias) 12" e o periodo
-    // do recorte - em nenhum deles o numero e o valor do rotulo. Sem esta
-    // checagem, a regra do "maior valor" em varrerPagina deixaria o 30 ou o
-    // 16% vencerem a contagem real do mesmo card.
-    if (seguidoDeUnidade(depoisDoNumero)) return null;
+    const valor = paraInteiro(bruto);
+    if (valor === null) return "nao e numero inteiro";
 
-    return paraInteiro(encontrado[0]);
+    // "Ativo desde 2024": ano, nao quantidade. So com o "desde" - "2024
+    // vendas" sozinho pode ser contagem real de um anuncio popular.
+    if (valor >= 1900 && valor <= 2099 && /desde\s+$/i.test(antes)) {
+      return "ano (desde ...)";
+    }
+
+    return null;
   }
 
   /**
@@ -384,36 +415,6 @@
   }
 
   /**
-   * Diz se um valor achado antes do rotulo e um ANO solto precedido de
-   * "desde" - ou seja, data de ativacao/publicacao, nao metrica.
-   *
-   * So o "desde" justifica a rejeicao: um ano de 4 digitos sozinho ("2024
-   * vendas") pode perfeitamente ser contagem real de um anuncio popular.
-   * Ja "desde 2024" e sempre leitura de tempo - ninguem diz "desde" para
-   * apresentar uma quantidade vendida.
-   *
-   * @param {string} trecho o texto inteiro antes do rotulo, ja com o numero
-   * @param {number} valor o numero que foi extraido dele (antes do rotulo)
-   * @returns {boolean}
-   */
-  function ehAnoPosDesde(trecho, valor) {
-    // Anos plausiveis (1900-2099). Fora disso nao e ano, e metrica mesmo.
-    if (valor < 1900 || valor > 2099) return false;
-
-    // Acha de novo a posicao do numero que sera julgado (o ultimo do trecho
-    // - o mesmo que ultimoNumeroColado entregou).
-    const numeros = Array.from(trecho.matchAll(/\d[\d.,]*/g));
-    if (numeros.length === 0) return false;
-
-    const ultimo = numeros[numeros.length - 1];
-    const antesDoNumero = trecho.slice(0, ultimo.index);
-
-    // "Ativo desde 2024" termina em "desde " antes do numero.
-    // \s+$ cobre espaco e quebra de linha, e o "i" aceita "Desde".
-    return /desde\s+$/i.test(antesDoNumero);
-  }
-
-  /**
    * Procura o codigo do anuncio (MLB...) a partir de um elemento.
    *
    * Numa lista de publicacoes cada card tem um link para o anuncio, entao
@@ -421,9 +422,13 @@
    * no endereco. Paramos no primeiro que achar.
    *
    * @param {Element} elemento ponto de partida
-   * @returns {string|null}
+   * @param {Document} doc
+   * @param {string} url endereco da pagina
+   * @param {Object} [saida] quando passado, recebe em "motivo" por que nao
+   *                         deu para definir o anuncio (para o diagnostico)
+   * @returns {Object|null} codigo e limite - ou null
    */
-  function contextoDoAnuncio(elemento, doc, url) {
+  function contextoDoAnuncio(elemento, doc, url, saida) {
     // Caso mais facil: a propria URL da pagina ja identifica o anuncio.
     // Vale quando estamos na tela de metricas de UM anuncio especifico -
     // ali a pagina inteira fala de um produto so, entao o limite e o body.
@@ -462,12 +467,21 @@
         // Desistir e melhor que chutar o primeiro: um numero atribuido ao
         // anuncio errado e pior do que numero nenhum, porque nao tem como
         // a vendedora perceber que esta errado.
-        if (codigos.length > 1) return null;
+        if (codigos.length > 1) {
+          if (saida) {
+            saida.motivo = "bloco com " + codigos.length +
+              " anuncios: nao da para saber de qual e o rotulo";
+          }
+          return null;
+        }
       }
 
       atual = atual.parentElement;
     }
 
+    if (saida) {
+      saida.motivo = "nenhum link de anuncio (MLB) perto do rotulo";
+    }
     return null;
   }
 
@@ -509,13 +523,14 @@
    *
    * A solucao para os tres e a mesma: subir no DOM. O textContent de um
    * elemento inclui o texto de todos os descendentes, entao em algum nivel
-   * acima numero e rotulo acabam no mesmo texto - e ai numeroAntesDe()
-   * resolve. Paramos no primeiro nivel que der resposta, porque subir demais
-   * comeca a misturar dados de outros anuncios da mesma pagina.
+   * acima numero e rotulo acabam no mesmo texto - e ai lerRotulo() resolve.
+   * Paramos no primeiro nivel que der resposta, porque subir demais comeca a
+   * misturar dados de outros anuncios da mesma pagina.
    *
    * @param {Element} elemento
    * @param {string} palavra
-   * @returns {Object|null} valor e trecho - o numero e o rastro dele
+   * @returns {Object|null} valor e trecho quando leu; recusa e trecho quando
+   *                        achou numero que nao pode usar; null sem nada
    */
   function valorDoRotulo(elemento, palavra, limite, doc) {
     let atual = elemento;
@@ -533,10 +548,17 @@
         const texto = atual.textContent;
         const leitura = lerRotulo(texto, palavra);
 
-        // Devolvemos o numero junto com o RASTRO: o pedaco de texto exato
-        // em que ele foi lido, neste nivel do DOM.
         if (leitura !== null) {
-          return { valor: leitura.valor, trecho: trechoDaLeitura(texto, leitura) };
+          // O RASTRO: o pedaco de texto exato em que o numero foi lido (ou
+          // recusado), neste nivel do DOM.
+          const trecho = trechoDaLeitura(texto, leitura);
+
+          // Leitura recusada (ambigua, preco, data...): paramos de subir. Um
+          // nivel acima o texto so fica maior, e a fila pode parecer
+          // resolvida por acidente - colando o numero no rotulo errado.
+          if (leitura.recusa) return { recusa: leitura.recusa, trecho: trecho };
+
+          return { valor: leitura.valor, trecho: trecho };
         }
       }
 
@@ -668,9 +690,13 @@
    * E mais rapido e evita pegar o mesmo texto varias vezes (o textContent
    * de um elemento pai repete o texto de todos os filhos).
    *
+   * @param {Document} doc
+   * @param {string} url endereco da pagina
+   * @param {Array} [recusas] quando passado (so no diagnostico), recebe cada
+   *                          rotulo que NAO virou numero, com o motivo
    * @returns {Object} mapa { MLB123: { visitas: 359 }, ... }
    */
-  function varrerPagina(doc, url) {
+  function varrerPagina(doc, url, recusas) {
     // Pagina sem "visita" nao e tela de vendedor: qualquer "vendido" que ela
     // mostre pertence a produto publico de OUTRO vendedor. A varredura
     // inteira e descartada antes de comecar (sairia daqui cheia de numeros
@@ -720,7 +746,16 @@
           // de palavras faria cada sinonimo refazer os querySelectorAll ate
           // 12 niveis de ancestral: na tela de listagem, com 50 cards, eram
           // milhares de varreduras quase do documento inteiro.
-          const contexto = contextoDoAnuncio(elemento, doc, url);
+          const saida = {};
+          const contexto = contextoDoAnuncio(elemento, doc, url, saida);
+
+          // Rotulo sem anuncio definido: no diagnostico, anota o porque.
+          if (!contexto && recusas) {
+            recusas.push({
+              motivo: saida.motivo,
+              trecho: contextoDoTexto(no, (no.nodeValue || "").trim())
+            });
+          }
 
           if (contexto) {
             const codigo = contexto.codigo;
@@ -735,7 +770,22 @@
                 const leitura = valorDoRotulo(elemento, palavra, contexto.limite, doc);
 
                 // So guardamos com as duas pontas: de qual anuncio, e quanto.
-                if (leitura === null) return;
+                // Sem leitura, ou com leitura recusada, nada vai para o cache -
+                // e o diagnostico (quando pedido) guarda o porque. E isso que
+                // responde "por que as vendas nao apareceram?".
+                if (leitura === null || leitura.recusa) {
+                  if (recusas) {
+                    recusas.push({
+                      codigo: codigo,
+                      metrica: metrica,
+                      motivo: leitura ? leitura.recusa : "nenhum numero colado ao rotulo",
+                      trecho: leitura
+                        ? leitura.trecho
+                        : contextoDoTexto(no, (no.nodeValue || "").trim())
+                    });
+                  }
+                  return;
+                }
 
                 if (!resultado[codigo]) resultado[codigo] = { origem: {} };
 
@@ -780,10 +830,18 @@
     Object.keys(resultado).forEach(function (codigo) {
       if (resultado[codigo].visitas !== undefined) {
         comVisitas[codigo] = resultado[codigo];
+      } else if (recusas) {
+        const origemVendas = resultado[codigo].origem.vendas;
+        recusas.push({
+          codigo: codigo,
+          metrica: "vendas",
+          motivo: "anuncio sem visitas lidas nesta tela (trava contra produto de outro vendedor)",
+          trecho: origemVendas ? origemVendas.trecho : ""
+        });
       }
     });
 
-    return descartarImplausiveis(comVisitas);
+    return descartarImplausiveis(comVisitas, recusas);
   }
 
   /**
@@ -803,9 +861,10 @@
    * resultado e impossivel.
    *
    * @param {Object} resultado
+   * @param {Array} [recusas] quando passado, recebe os anuncios descartados
    * @returns {Object} so os anuncios cujos numeros fazem sentido
    */
-  function descartarImplausiveis(resultado) {
+  function descartarImplausiveis(resultado, recusas) {
     const limpo = {};
 
     Object.keys(resultado).forEach(function (codigo) {
@@ -820,6 +879,14 @@
           "[ML METRICS] leitura descartada em " + codigo +
           ": " + dados.vendas + " vendas para " + dados.visitas + " visitas"
         );
+
+        if (recusas) {
+          recusas.push({
+            codigo: codigo,
+            motivo: "vendas maiores que visitas: anuncio inteiro descartado",
+            trecho: dados.vendas + " vendas, " + dados.visitas + " visitas"
+          });
+        }
         return;
       }
 
@@ -946,7 +1013,12 @@
 
               try {
                 chrome.storage.local.set({ [CHAVE_CACHE]: novoCache }, function () {
-                  // Quota estourada nao tem o que fazer aqui; terminamos a fila.
+                  // Ler o lastError evita o aviso "Unchecked runtime.lastError"
+                  // no console. Quota estourada nao tem o que fazer aqui:
+                  // avisamos, terminamos a fila, e a proxima gravacao tenta.
+                  if (chrome.runtime.lastError) {
+                    console.warn("[ML METRICS] nao consegui gravar o cache");
+                  }
                   resolve();
                 });
               } catch (e) {
@@ -1223,7 +1295,10 @@
           .slice(0, 3);
 
         try {
-          chrome.storage.local.set({ [CHAVE_ORIGENS]: atualizadas });
+          chrome.storage.local.set({ [CHAVE_ORIGENS]: atualizadas }, function () {
+            // Ler o lastError evita o aviso "Unchecked runtime.lastError".
+            if (chrome.runtime.lastError) return;
+          });
         } catch (e) {
           // contexto invalidado: origens nao sao essenciais, tenta depois
         }
@@ -1275,7 +1350,10 @@
           // varias abas abertas ao mesmo tempo passariam todas pela trava
           // antes da primeira terminar.
           try {
-            chrome.storage.local.set({ [CHAVE_ULTIMA_BUSCA]: Date.now() });
+            chrome.storage.local.set({ [CHAVE_ULTIMA_BUSCA]: Date.now() }, function () {
+              // Ler o lastError evita o aviso "Unchecked runtime.lastError".
+              if (chrome.runtime.lastError) return;
+            });
           } catch (e) {
             return;  // contexto invalidado: nem tenta buscar
           }
@@ -1401,6 +1479,9 @@
           quando: agora,
           amostras: amostras
         }
+      }, function () {
+        // Ler o lastError evita o aviso "Unchecked runtime.lastError".
+        if (chrome.runtime.lastError) return;
       });
     } catch (e) {
       // Contexto invalidado: diagnostico nao e essencial, proximo ciclo tenta.
@@ -1428,8 +1509,13 @@
 
     let no = caminhante.nextNode();
 
-    // Paramos em 25 amostras: o suficiente para entender o padrao da tela
-    // sem encher o storage nem gerar um relatorio impossivel de ler.
+    // Ate 12 amostras POR METRICA, 25 no total: o suficiente para entender o
+    // padrao da tela sem encher o storage nem gerar um relatorio impossivel
+    // de ler. O limite por metrica existe porque uma lista com muitos
+    // "visitas" em sequencia enchia as 25 vagas antes de aparecer um unico
+    // texto de vendas - justo o que se queria investigar.
+    const porMetrica = {};
+
     while (no && amostras.length < 25) {
       const texto = (no.nodeValue || "").trim();
       const minusculo = texto.toLowerCase();
@@ -1441,16 +1527,22 @@
       const daExtensao = Boolean(elemento &&
         elemento.closest("#mlmetrics-painel, #mlmetrics-aviso"));
 
-      const pareceMetrica = Object.keys(ROTULOS).some(function (metrica) {
-        return ROTULOS[metrica].some(function (palavra) {
+      // A primeira metrica que o texto menciona (ou undefined).
+      const metrica = Object.keys(ROTULOS).filter(function (nome) {
+        return ROTULOS[nome].some(function (palavra) {
           return minusculo.indexOf(palavra) !== -1;
         });
-      });
+      })[0];
+
+      const temVaga = metrica !== undefined && (porMetrica[metrica] || 0) < 12;
 
       // O limite de tamanho descarta paragrafos: se o texto e longo, e
       // prosa mencionando a palavra, nao um rotulo de metrica.
-      if (!daExtensao && pareceMetrica && texto.length > 0 && texto.length < 120) {
+      if (!daExtensao && temVaga && texto.length > 0 && texto.length < 120) {
+        porMetrica[metrica] = (porMetrica[metrica] || 0) + 1;
+
         amostras.push({
+          metrica: metrica,
           texto: texto,
           // Janela em volta do rotulo, nao o pai inteiro. Pegar o pai todo
           // arrastava titulo, preco, nome de comprador e numero de pedido
@@ -1515,6 +1607,10 @@
     const url = window.location.href;
     const vitrine = ehPaginaDeCompra(url);
 
+    // Cada rotulo que NAO virou numero, com o motivo (ver varrerPagina).
+    const recusas = [];
+    const captura = vitrine ? null : varrerPagina(document, url, recusas);
+
     return {
       host: window.location.hostname,
       caminho: caminhoMascarado(window.location.pathname),
@@ -1524,9 +1620,31 @@
       mencionaVisita: paginaMencionaVisita(document),
       // O que o coletor gravaria se varresse agora ({} = nada passou pelas
       // travas). Em vitrine ele nem varre, entao fica null.
-      capturariaAgora: vitrine ? null : varrerPagina(document, url),
+      capturariaAgora: captura,
+      // Contagem por motivo primeiro: com 50 anuncios na tela, e ela que
+      // mostra de relance se o problema e o mesmo em todos.
+      resumoDasRecusas: resumirRecusas(recusas),
+      // As primeiras 40, cada uma com o trecho de texto em que aconteceu.
+      recusas: recusas.slice(0, 40),
       amostras: coletarAmostras(document)
     };
+  }
+
+  /**
+   * Conta as recusas por metrica e motivo, para o diagnostico.
+   *
+   * @param {Array} recusas
+   * @returns {Object} chave "metrica: motivo", valor quantas vezes
+   */
+  function resumirRecusas(recusas) {
+    const resumo = {};
+
+    recusas.forEach(function (recusa) {
+      const chave = (recusa.metrica ? recusa.metrica + ": " : "") + recusa.motivo;
+      resumo[chave] = (resumo[chave] || 0) + 1;
+    });
+
+    return resumo;
   }
 
   /**
@@ -1603,8 +1721,14 @@
      * @returns {boolean}
      */
     function mutacaoDaExtensao(mutacao) {
-      if (mutacao.target && mutacao.target.closest &&
-          mutacao.target.closest("#mlmetrics-painel, #mlmetrics-aviso")) {
+      // Mutacao de texto (characterData) tem um no de TEXTO como alvo, que nao
+      // tem closest - o elemento que interessa e o pai dele.
+      const alvo = (mutacao.target && mutacao.target.nodeType === 3)
+        ? mutacao.target.parentElement
+        : mutacao.target;
+
+      if (alvo && alvo.closest &&
+          alvo.closest("#mlmetrics-painel, #mlmetrics-aviso")) {
         return true;
       }
 
@@ -1629,8 +1753,11 @@
         return;
       }
 
-      // Mudo o DOM da extensao: nao e conteudo do ML, nao vale re-varrer.
-      if (mutacoes.some(mutacaoDaExtensao)) return;
+      // Lote SO com mudancas da propria extensao: nao e conteudo do ML, nao
+      // vale re-varrer. Se o lote mistura mudanca nossa com mudanca do site,
+      // a do site conta - antes, uma unica mutacao nossa descartava o lote
+      // inteiro, e a tela nova do ML ficava sem varredura.
+      if (mutacoes.every(mutacaoDaExtensao)) return;
 
       // DEBOUNCE: montar uma lista dispara centenas de mutacoes seguidas.
       // Varrer a cada uma travaria a pagina. Entao cada mutacao CANCELA a
@@ -1646,11 +1773,18 @@
     });
 
     observador.observe(document.body, {
-      childList: true,  // elementos adicionados ou removidos
-      subtree: true     // em qualquer profundidade, nao so nos filhos diretos
-      // Nao observamos "characterData" (texto alterado no lugar) de proposito:
-      // dobraria o volume de eventos para ganhar pouco, ja que o ML troca os
-      // elementos inteiros em vez de editar o texto dentro deles.
+      childList: true,      // elementos adicionados ou removidos
+      subtree: true,        // em qualquer profundidade, nao so nos filhos diretos
+
+      // Texto trocado NO LUGAR. Quando so o numero muda (filtro de periodo,
+      // pagina 2 reaproveitando as linhas), o React altera o texto do no que
+      // ja existe - sem isto, a varredura nem era disparada. O debounce acima
+      // absorve o volume extra de eventos.
+      characterData: true,
+
+      // Link trocado no lugar: a mesma linha passa a ser de outro anuncio.
+      attributes: true,
+      attributeFilter: ["href"]
     });
   }
 })();
