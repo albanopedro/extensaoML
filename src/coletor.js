@@ -52,6 +52,11 @@
   // Serve para diagnostico remoto - ver salvarDiagnostico().
   const CHAVE_DIAGNOSTICO = "mlmetrics_diagnostico";
 
+  // Ultimo erro inesperado da leitura (ver registrarErro). Existe porque
+  // excecao no meio da varredura e invisivel para quem usa: a aba continua
+  // aberta, nada aparece na tela e o diagnostico nao teria o que dizer.
+  const CHAVE_ERRO = "mlmetrics_erro";
+
   // Enderecos de telas de vendedor que ja entregaram numeros, e quando
   // foi a ultima busca automatica neles.
   const CHAVE_ORIGENS = "mlmetrics_origens";
@@ -79,6 +84,9 @@
   // Ultimo diagnostico gravado: de qual tela e quando (trava do
   // salvarDiagnostico, que e por tela - ver la).
   let ultimoDiagnostico = { caminho: null, quando: 0 };
+
+  // Ultimo erro ja gravado: qual mensagem e quando (trava do registrarErro).
+  let ultimoErro = { mensagem: null, quando: 0 };
 
   // Identificadores de anuncio do Mercado Livre.
   //
@@ -350,6 +358,14 @@
     const depois = texto.slice(fim, fim + 40);
 
     if (/[\/:]/.test(bruto) || ehData(bruto)) return "data ou hora";
+
+    // FORMA de data com ponto, valida ou nao. "31.04.2023" nao existe no
+    // calendario, entao o ehData diz "nao e data" - mas tambem nao e
+    // contagem: sem esta linha o numero virava 31.042.023 visitas. A barra e
+    // os dois-pontos ja caem no teste acima; aqui sobra o ponto. Milhar de
+    // verdade nao casa, porque o grupo do meio tem tres digitos
+    // ("1.299.500").
+    if (/^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(bruto)) return "data ou hora";
     if (bruto.indexOf(",") !== -1) return "decimal (preco ou media)";
     if (seguidoDeUnidade(depois)) return "seguido de unidade (%, periodo, mil)";
 
@@ -1174,23 +1190,34 @@
 
   /**
    * Varre e guarda, se este for um lugar de onde se deve coletar.
+   *
+   * O corpo inteiro fica dentro de try/catch porque a leitura roda em cima
+   * de uma tela que nao controlamos. Uma excecao aqui (formato novo do ML,
+   * DOM em estado inesperado) mataria o callback do observer em silencio: a
+   * aba fica aberta, nada aparece, e quem esta do outro lado so consegue
+   * dizer "nao apareceu nada". Registrado, o mesmo caso vira uma linha no
+   * "Copiar diagnostico" com a mensagem e a funcao que quebrou.
    */
   function coletar() {
-    if (ehPaginaDeCompra(window.location.href)) return;
+    try {
+      if (ehPaginaDeCompra(window.location.href)) return;
 
-    const achados = varrerPagina(document, window.location.href);
+      const achados = varrerPagina(document, window.location.href);
 
-    // Nada capturado numa tela onde deveria haver algo. Em vez de apenas
-    // desistir em silencio, registramos o que estava escrito na pagina.
-    if (Object.keys(achados).length === 0) {
-      salvarDiagnostico();
-      return;
+      // Nada capturado numa tela onde deveria haver algo. Em vez de apenas
+      // desistir em silencio, registramos o que estava escrito na pagina.
+      if (Object.keys(achados).length === 0) {
+        salvarDiagnostico();
+        return;
+      }
+
+      salvar(achados);
+
+      // Deu certo aqui: guardamos o endereco para poder voltar sozinhos depois.
+      lembrarOrigem(window.location.href);
+    } catch (e) {
+      registrarErro("coletar", e);
     }
-
-    salvar(achados);
-
-    // Deu certo aqui: guardamos o endereco para poder voltar sozinhos depois.
-    lembrarOrigem(window.location.href);
   }
 
   // --------------------------------------------------------------------------
@@ -1427,6 +1454,68 @@
       });
     } catch (e) {
       // Contexto invalidado: diagnostico nao e essencial, proximo ciclo tenta.
+    }
+  }
+
+  /**
+   * Guarda o ultimo erro inesperado da leitura, para o diagnostico.
+   *
+   * Sem isto, excecao no meio da varredura e a pior falha possivel neste
+   * projeto: silenciosa. O callback do observer morre, a aba segue aberta,
+   * o painel nao aparece e o diagnostico mostra uma tela "normal" - quem
+   * esta do outro lado so consegue dizer "nao apareceu nada", e nao da para
+   * consertar as cegas. Gravado, o mesmo caso chega pelo "Copiar
+   * diagnostico" com a mensagem, a funcao que quebrou e a tela.
+   *
+   * Nao guarda nada da pagina: so a mensagem do erro, a pilha da propria
+   * extensao e o caminho mascarado.
+   *
+   * @param {string} onde nome da funcao que quebrou
+   * @param {Error} erro
+   */
+  function registrarErro(onde, erro) {
+    const mensagem = String((erro && erro.message) || erro);
+    const agora = Date.now();
+
+    // Trava de repeticao: o observer chama coletar a cada 600ms, e um erro
+    // que se repete gravaria no storage o tempo todo. Mensagem nova grava na
+    // hora; a mesma mensagem, so depois de um minuto.
+    const REPETICAO_MS = 60 * 1000;
+
+    if (mensagem === ultimoErro.mensagem &&
+        agora - ultimoErro.quando < REPETICAO_MS) {
+      return;
+    }
+    ultimoErro = { mensagem: mensagem, quando: agora };
+
+    // No console para quem abrir o F12, e no storage para o "Copiar
+    // diagnostico" - que e como a cliente conta o que aconteceu.
+    console.error("[ML METRICS] erro em " + onde + ": " + mensagem);
+
+    try {
+      chrome.storage.local.set({
+        [CHAVE_ERRO]: {
+          onde: onde,
+          mensagem: mensagem,
+          // Duas primeiras linhas da pilha: dizem a funcao e a linha do
+          // arquivo. A pilha inteira encheria o relatorio.
+          pilha: String((erro && erro.stack) || "").split("\n").slice(0, 3).join(" | "),
+          host: window.location.hostname,
+          // Mascarado, como no resto do diagnostico: a FORMA da rota, sem
+          // codigo de anuncio nem titulo de produto.
+          tela: caminhoMascarado(window.location.pathname),
+          quando: agora,
+          // A versao diz se o erro e desta build ou de uma antiga que ficou
+          // guardada no storage.
+          versao: chrome.runtime.getManifest().version
+        }
+      }, function () {
+        // Ler o lastError evita o aviso "Unchecked runtime.lastError"; se a
+        // gravacao falhar, nao ha plano melhor do que o console.
+        if (chrome.runtime.lastError) return;
+      });
+    } catch (e) {
+      // Contexto invalidado: o erro fica so no console desta aba.
     }
   }
 
@@ -1804,7 +1893,19 @@
         return;
       }
 
-      responder(diagnosticarTelaAtual());
+      // O diagnostico varre a tela com o mesmo codigo da captura. Se ele
+      // quebrar, o popup ficaria sem resposta e mandaria apertar F5 - a
+      // pista errada. Respondemos com o erro, que e justamente o que
+      // interessa saber nessa hora.
+      try {
+        responder(diagnosticarTelaAtual());
+      } catch (e) {
+        registrarErro("diagnosticarTelaAtual", e);
+        responder({
+          erro: "a extensao quebrou ao ler esta tela: " +
+            String((e && e.message) || e)
+        });
+      }
     });
   } catch (e) {
     // Contexto invalidado: o popup relata que a aba nao respondeu.

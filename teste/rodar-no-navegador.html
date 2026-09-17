@@ -83,7 +83,7 @@
    * verdade, e eventos onChanged. Sem sendMessage de proposito: o coletor cai
    * no plano B de gravar na propria aba (o service worker e testado no Node).
    */
-  function chromeFalso(armazem) {
+  function chromeFalso(armazem, opcoes) {
     const ouvintesDoStorage = [];
 
     const falso = {
@@ -126,6 +126,14 @@
       }
     };
 
+    // sendMessage MUDO: o service worker recebe e nunca responde - o
+    // navegador pode derruba-lo no meio da fila. Sem o tempo limite do plano
+    // B (TIMEOUT_PLANO_B_MS, 0.1.7), a leitura ficaria sem ninguem que a
+    // gravasse, porque o lastError nunca chega nesse caso.
+    if (opcoes && opcoes.sendMessageMudo) {
+      falso.runtime.sendMessage = function () {};
+    }
+
     return falso;
   }
 
@@ -146,13 +154,13 @@
    * da extensao na ordem do manifest. "antes" pode mexer na pagina antes de os
    * scripts rodarem (acrescentar cards de teste, por exemplo).
    */
-  function abrirFixture(endereco, armazem, scripts, antes) {
+  function abrirFixture(endereco, armazem, scripts, antes, opcoes) {
     return new Promise(function (resolve, reject) {
       const quadro = document.createElement("iframe");
 
       quadro.onload = function () {
         const janela = quadro.contentWindow;
-        const falso = chromeFalso(armazem);
+        const falso = chromeFalso(armazem, opcoes);
 
         Object.defineProperty(janela, "chrome", { value: falso, writable: true, configurable: true });
         if (antes) antes(janela.document);
@@ -384,6 +392,50 @@
 
     testar("#42: extensao recarregada (script orfao) tira o painel", null,
       catalogo.documento.getElementById("mlmetrics-painel"));
+
+    // --- 6. Erro inesperado na leitura vira registro, nao silencio ----------
+    // Formato novo do ML ou DOM em estado estranho: a varredura quebra. Antes
+    // a excecao matava o callback do observer sem deixar rastro - a cliente so
+    // conseguia dizer "nao apareceu nada".
+    const armazemErro = {};
+    await abrirFixture(
+      "/teste/publicacoes.html?caso=erro",
+      armazemErro,
+      ["/src/gravacao.js", "/src/coletor.js"],
+      function (documento) {
+        documento.createTreeWalker = function () {
+          throw new Error("DOM em estado inesperado");
+        };
+      }
+    );
+    await esperar(700);
+
+    const registroErro = armazemErro.mlmetrics_erro;
+
+    testar("erro na leitura vira registro no storage", "DOM em estado inesperado",
+      registroErro ? registroErro.mensagem : "sem registro");
+    testar("erro na leitura diz qual funcao quebrou", "coletar",
+      registroErro ? registroErro.onde : "sem registro");
+    testar("erro na leitura nao inventa metrica", undefined, armazemErro.mlmetrics_dados);
+
+    // --- 7. Service worker que nunca responde (plano B por tempo) -----------
+    const armazemMudo = {};
+    await abrirFixture(
+      "/teste/publicacoes.html?caso=sw-mudo",
+      armazemMudo,
+      ["/src/gravacao.js", "/src/coletor.js"],
+      null,
+      { sendMessageMudo: true }
+    );
+    await esperar(1000);
+
+    testar("plano B: nada gravado enquanto o SW ainda pode responder", undefined,
+      armazemMudo.mlmetrics_dados);
+
+    await esperar(3000);
+
+    testar("plano B: passado o tempo limite, a aba grava sozinha", 359,
+      campo(armazemMudo.mlmetrics_dados || {}, "MLB1111111111", "visitas"));
   }
 
   function mostrarResumo() {

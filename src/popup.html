@@ -32,6 +32,18 @@
       color: #888;
     }
 
+    /* Erro inesperado da leitura. Vermelho e acima de tudo: e a unica
+       coisa do popup que pede uma acao imediata. */
+    #erro {
+      background: #fdecea;
+      border: 1px solid #f5c2bd;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      line-height: 1.5;
+      color: #8a1c13;
+    }
+
     #resumo {
       background: #f5f5f5;
       border-radius: 6px;
@@ -115,6 +127,8 @@
 <body>
 
 <h1>ML Metrics <span id="versao"></span></h1>
+
+<div id="erro" hidden=""></div>
 
 <div id="resumo">Carregando...</div>
 

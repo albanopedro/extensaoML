@@ -100,6 +100,9 @@ me diz:
   Se algum não bateu, me mande o texto que aparece entre « » para ele (está
   no ícone da extensão).
 - Apareceu algum número que você sabe que está errado?
+- **Apareceu um aviso vermelho** quando você clicou no ícone da extensão? Se sim,
+  me mande o "Copiar diagnóstico" dessa tela: o aviso quer dizer que a extensão
+  travou ao ler alguma coisa, e o diagnóstico me diz o quê.
 
 **Se nada aparecer, também me avisa** — é informação útil, não é problema.
 Nesse caso o print da tela de "Minhas publicações" me ajuda muito, porque é

@@ -3,7 +3,7 @@
 > Cole este arquivo inteiro no início de uma nova conversa. Ele contém tudo que é
 > preciso saber para continuarmos corrigindo os problemas sem refazer a análise.
 >
-> **Atualizado em 15/09/2026, depois do lote 23a (período no diagnóstico).** O que falta fazer está
+> **Atualizado em 17/09/2026, depois do lote 24 (erro visível em vez de falha silenciosa).** O que falta fazer está
 > na **seção 5**. O que já foi feito está resumido e sinalizado na **seção 6**.
 
 ---
@@ -35,7 +35,7 @@ envolvido → propõe a correção → aplicamos.**
 - **Sem acentos nos comentários de código** (o projeto segue isso). Em texto de
   interface exibido para a usuária, acentos normais.
 - **Antes de corrigir, confirme a linha.** Os números de linha da seção 5 valem para o
-  estado do código em **15/09/2026, depois do lote 23a**. Depois de cada correção eles
+  estado do código em **17/09/2026, depois do lote 24**. Depois de cada correção eles
   saem do lugar.
 - **Toda correção entra com caso de teste**: no harness (`node teste/test-parsing.js`)
   quando a função for testável fora do navegador; na página de teste
@@ -56,7 +56,7 @@ envolvido → propõe a correção → aplicamos.**
 (visitas, vendas, conversão, receita estimada) nos anúncios do Mercado Livre de uma
 vendedora.
 
-Caminho: `C:\codes\extensaoML` · versão no manifest: **0.1.6**
+Caminho: `C:\codes\extensaoML` · versão no manifest: **0.1.8**
 
 **Restrição central do projeto:** a API pública do Mercado Livre devolve 403 e
 exigiria OAuth ou cookie de sessão. Por isso a extensão **raspa a tela** em vez de
@@ -79,7 +79,7 @@ extensaoML/
 │   │                        telas para a atualizacao automatica (desligada).
 │   ├── gravacao.js (~185)   A REGRA de mesclar uma leitura no cache. Roda no
 │   │                        service worker e, como plano B, nas abas.
-│   ├── coletor.js (~1686)   CAPTURA. Roda em toda pagina do ML. Le cada
+│   ├── coletor.js (~2015)   CAPTURA. Roda em toda pagina do ML. Le cada
 │   │                        rotulo pela fila de numeros e rotulos e manda
 │   │                        gravar COM o rastro de origem de cada numero.
 │   │                        Responde o diagnostico do popup, inclusive por
@@ -88,14 +88,14 @@ extensaoML/
 │   │                        storage e monta o painel azul - so com numero
 │   │                        que tem rastro. Preco so de dado estruturado.
 │   ├── content.css (~132)   Estilo do painel e do aviso verde.
-│   └── popup.html / popup.js (~336)  Painel de controle (mostra a versao): lista o capturado
+│   └── popup.html / popup.js (~371)  Painel de controle (mostra a versao): lista o capturado
 │                            com a origem de cada numero, limpa dados, copia
 │                            diagnostico da aba aberta.
 ├── teste/
-│   ├── test-parsing.js             Harness Node (191 casos, 191/191 PASS em 15/09),
+│   ├── test-parsing.js             Harness Node (231 casos, 231/231 PASS em 17/09),
 │   │                               inclusive gravacao.js e o service worker.
 │   ├── servidor-teste.js           Servidor local (127.0.0.1, lista fechada).
-│   ├── rodar-no-navegador.html     Teste em DOM real (31 casos, 31/31 PASS).
+│   ├── rodar-no-navegador.html     Teste em DOM real (42 casos, 42/42 PASS).
 │   ├── publicacoes.html            Fixture da tela "Minhas publicacoes", com gabarito.
 │   ├── MLB-1111111111-anuncio.html Fixture da pagina de anuncio, com gabarito.
 │   ├── vitrine-up-sanitizada.html  Fixture sanitizada da vitrine /up/ real.
@@ -113,6 +113,7 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
 | `mlmetrics_dados` | `{ MLB123: { visitas, vendas, capturadoEm, origem: { visitas: { trecho, tela, em, automatica }, vendas: {…} } } }` — o cache principal. Número sem `origem` não é exibido. |
 | `mlmetrics_diagnostico` | `{ host, caminho (mascarado), quando, amostras, periodo }` — gravado quando a captura falha |
 | `mlmetrics_origens` | até 3 URLs (sem query) de telas de vendedor que já entregaram números |
+| `mlmetrics_erro` | `{ onde, mensagem, pilha, host, tela (mascarada), quando, versao }` — último erro inesperado da leitura (lote 24). Aparece em vermelho no popup e no relatório |
 | `mlmetrics_ultima_busca` | timestamp da última busca automática (trava de 2 h). Com a busca desligada, a chave não é mais criada. |
 
 ### Fluxo
@@ -144,6 +145,9 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
    responder, a aba grava sozinha pela mesma regra. Depois mostra o toast verde e lembra
    o endereço da tela (nunca URL de anúncio isolado). Sem captura → `salvarDiagnostico` (trava de 3 min **por tela**).
    Se a extensão for recarregada, o script vira órfão e se desliga (`extensaoViva`).
+   **Exceção inesperada na leitura não é mais silenciosa** (lote 24): `coletar()` inteiro
+   fica em `try/catch` e `registrarErro` grava `mlmetrics_erro` (função, mensagem, 3
+   linhas de pilha, tela mascarada, versão), com trava de 1 min para a mesma mensagem.
 2. **`content.js`** roda em URL que contém `MLB…`: monta os códigos candidatos
    (`codigosDaPagina`: `item_id`/`wid` da query ou do `#` primeiro, o caminho por
    último), usa o primeiro com número provado (`escolherRegistro`), **descarta número
@@ -163,6 +167,8 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
    Desligada porque a tela de vendedor é montada por JavaScript, e o HTML buscado muito
    provavelmente não traz os números.
 4. **Popup** (com a versão ao lado do nome):
+   - **Aviso vermelho no topo** quando existe `mlmetrics_erro`: diz que a extensão
+     falhou ao ler uma tela, quando foi, e manda copiar o diagnóstico (lote 24).
    - "Limpar dados guardados" apaga todas as chaves `mlmetrics_`.
    - A lista mostra, embaixo de cada número, o rastro (trecho « », tela, hora).
      Registro sem rastro aparece como "sem origem (versão antiga)".
@@ -173,8 +179,8 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
      escolhida (#47) —, **resumoDasRecusas** e **recusas** — por que cada rótulo não
      virou número —, amostras com até 12 por métrica; ou o erro "a aba não respondeu,
      aperte F5"),
-     `origens` mascaradas, `capturado` e `ultimoDiagnosticoGuardado`. O texto aparece
-     sempre num `<textarea>`, além do clipboard.
+     `ultimoErro`, `origens` mascaradas, `capturado` e `ultimoDiagnosticoGuardado`. O
+     texto aparece sempre num `<textarea>`, além do clipboard.
 5. **Envio para a cliente:** `powershell -ExecutionPolicy Bypass -File .\empacotar.ps1`
    → `dist\ML-Metrics-<versão>.zip`. Nunca zipar a pasta de trabalho.
 
@@ -191,10 +197,12 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
 | Relato da cliente (15/09) — #57 a #61 | ✅ **lote 21**: "no anúncio aparecem só as visitas" levou à troca da leitura por fila de peças (#57), à recusa de preço inteiro e faixa "+N" (#58), ao diagnóstico com o motivo de cada recusa (#59), à receita só com preço estruturado (#60) e a acabamentos (#61). |
 | Pedido do Pedro (15/09) — lote 22 | ✅ "pode fazer tudo": limite de custo da leitura, teste no navegador versionado, testes da gravação, versão no popup, #38 (item + catálogo), #21 (gravação única no service worker) e as três decisões recomendadas — #46 (sem painel "Sem dados"), #40 (alerta em vez de descarte) e busca automática desligada. |
 | Pedido do Pedro (15/09) — lote 23a | ✅ **período no diagnóstico** (preparo do #47): `telaAtual.periodo` traz os textos de filtro de período da tela ("Últimos 30 dias", intervalo de datas, abas, lista) e marca a opção escolhida. Não muda o que é gravado nem o painel. |
+| Pedro (15/09) — 0.1.7 | ✅ robustez feita por ele: tempo limite do plano B (SW que não responde), `ehData` validando dia por mês, `try/catch` em volta do `new URL` (varrer e vitrine), `lastError.message` nas falhas de gravação. **Entrou sem caso de teste e sem registro aqui** — coberto no lote 24. |
+| Pedido do Pedro (17/09) — lote 24 | ✅ **erro visível**: `coletar()` e o diagnóstico em `try/catch`, `mlmetrics_erro` no storage, aviso vermelho no popup e `ultimoErro` no relatório. Mais os testes que faltavam da 0.1.7 e o buraco que ela abriu (`31.04.2023` virava 31.042.023) fechado em `motivoDoNumero`. |
 | Revisão 1 — resíduo #21 | ✅ corrida entre abas resolvida no lote 22 (gravação única no service worker). |
-| Harness | **221/221 PASS** (+30 casos no lote 23a, período no diagnóstico; o lote 22 trouxe `gravacao.js` e o service worker com gravações simultâneas). `node --check` ok em todos os JS. |
-| Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **37/37 PASS**. Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
-| Pacote | `dist\ML-Metrics-0.1.6.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
+| Harness | **231/231 PASS** (+10 casos no lote 24: data inválida com ponto, URL quebrada e o `ehData` da 0.1.7). `node --check` ok em todos os JS. |
+| Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **42/42 PASS** (+5 no lote 24: erro na leitura virando registro e o plano B por tempo da 0.1.7). Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
+| Pacote | `dist\ML-Metrics-0.1.8.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
 
 ### ⚠️ Repositório público — decisão do Pedro
 
@@ -211,12 +219,13 @@ git/GitHub — é ação do Pedro.
 O harness e o teste no navegador (`teste/rodar-no-navegador.html`) cobrem os itens 1, 3,
 5, 6 e 7 com `chrome` falso, e o item 8 no Node; falta confirmar com a extensão de
 verdade (mensagens popup ↔ aba ↔ service worker e storage reais). Com a extensão
-carregada (0.1.6):
+carregada (0.1.8):
 
 1. **#44** — numa aba do ML, ícone → "Copiar diagnóstico": o relatório tem `telaAtual`
    com `host`, `caminho` mascarado, `vitrine`, `mencionaVisita`, `capturariaAgora`,
    `periodo` e `amostras`. Numa tela com filtro de período, `periodo` lista o filtro e
-   marca o escolhido (`marcado: true`).
+   marca o escolhido (`marcado: true`). Com tudo funcionando, `ultimoErro` vem `null` e
+   o popup não mostra o aviso vermelho.
 2. **#44** — numa aba que não é do ML (ex.: `edge://extensions`), "Copiar diagnóstico":
    `telaAtual.erro` com a mensagem de F5.
 3. **#42** — com uma aba do ML aberta, recarregar a extensão e, **sem F5**, copiar o
@@ -234,13 +243,13 @@ carregada (0.1.6):
    trecho de cada um.
 8. **#21** — com duas telas de vendedor abertas em abas diferentes (F5 nas duas), o
    popup lista os anúncios das duas; nenhuma apaga o que a outra gravou.
-9. **Popup** — o título mostra "ML Metrics v0.1.6".
+9. **Popup** — o título mostra "ML Metrics v0.1.8".
 
 ### Ação pendente (depois da verificação)
 
-1. Rodar `empacotar.ps1` e enviar `dist\ML-Metrics-0.1.6.zip` à cliente.
+1. Rodar `empacotar.ps1` e enviar `dist\ML-Metrics-0.1.8.zip` à cliente.
 2. A cliente segue **"Depois de uma atualização"** do guia: substituir os arquivos na
-   mesma pasta, recarregar a extensão, conferir a versão **0.1.6** (também no popup),
+   mesma pasta, recarregar a extensão, conferir a versão **0.1.8** (também no popup),
    **F5** nas abas do ML.
 3. A cliente clica **"Limpar dados guardados"** (agora apaga também as origens
    envenenadas pelo build antigo).
@@ -297,7 +306,7 @@ código**: são decisões e ações do Pedro fora do repositório/extensão em s
 | # | Sev. | Título | Status | Quem resolve |
 |---|---|---|---|---|
 | #50 | MÉDIO | Privacidade no repositório GitHub (resíduo: repo público + histórico) | ⚠️ parcial | Pedro (GitHub) |
-| — | — | Commit do lote 22/23a, verificação manual (9 itens), envio da 0.1.6 à cliente | ⬜ | Pedro |
+| — | — | Commit do lote 24, verificação manual (9 itens), envio da 0.1.8 à cliente | ⬜ | Pedro |
 
 ---
 
@@ -442,6 +451,27 @@ conservadora do #37 (0.1.3) era a causa provável — e escondia um erro pior.
 | Guia da cliente | "Copiar diagnóstico" explica que o relatório traz o período e qual está escolhido. |
 | Testes | Harness +30 (vocabulário, stub com botão, abas aria, lista, campo, exclusões e limite) → **221/221**; navegador +6 com controles reais (`option.selected`, `label.control.checked`, `aria-pressed`, `input.value`) → **37/37**. `manifest.json` → **0.1.6**, zip gerado. |
 
+### 0.1.7 — robustez feita pelo Pedro (15/09/2026)
+
+Commit `2fedda6`, sem caso de teste e sem registro aqui na época. O lote 24 cobriu as
+quatro mudanças com teste:
+
+| Item | O que mudou |
+|---|---|
+| Plano B por tempo | `TIMEOUT_PLANO_B_MS = 3000` no `salvar`: se o service worker não responder (pode ser derrubado no meio da fila), a aba grava sozinha. Antes, só o `lastError` disparava o plano B — resposta que nunca chega deixava a leitura sem ninguém. |
+| `ehData` por calendário | Valida o dia máximo de cada mês (fevereiro aceita 29). **Efeito colateral:** afrouxou o `motivoDoNumero` — ver lote 24. |
+| URL inválida | `try/catch` em volta do `new URL` em `varrerPagina` (rastro vira "(url invalida)") e em `ehPaginaDeCompra` (devolve `false`). |
+| Mensagem do `lastError` | Falha de gravação (quota, contexto inválido) agora leva a mensagem ao console e à resposta do service worker. |
+
+### Lote 24 — erro visível e a dívida da 0.1.7 (17/09/2026)
+
+| Item | O que foi feito |
+|---|---|
+| Falha silenciosa na leitura | `coletar()` inteiro em `try/catch` + `registrarErro`: grava `mlmetrics_erro` (função, mensagem, 3 linhas de pilha, host, tela mascarada, hora, versão), com trava de 1 min por mensagem repetida — o observer chama a leitura a cada 600 ms. O diagnóstico do popup também ficou protegido: se `diagnosticarTelaAtual` quebrar, a resposta é o erro, não o silêncio que virava "aperte F5". |
+| Erro que aparece | Aviso vermelho no topo do popup ("a extensão teve um erro ao ler uma tela em …, clique em Copiar diagnóstico") e `ultimoErro` no relatório. Sem erro, nada aparece. |
+| Buraco aberto pela 0.1.7 | `ehData` mais rigoroso deixou de reconhecer data inválida, e `31.04.2023` passava a valer **31.042.023 visitas**. `motivoDoNumero` passou a recusar a **forma** de data com ponto (`\d{1,2}.\d{1,2}.\d{2,4}`); milhar de verdade ("1.299.500") não casa porque o grupo do meio tem três dígitos. |
+| Testes que faltavam | Harness +10 (dia por mês, data inválida com ponto e com barra, milhar preservado, URL quebrada na varredura e na vitrine) → **231/231**. Navegador +5 (erro na leitura virando registro, sem inventar métrica; plano B por tempo com service worker mudo) → **42/42**. `manifest.json` → **0.1.8**, zip gerado. |
+
 ---
 
 ## 7. Leitura de conjunto (o diagnóstico de fundo)
@@ -487,6 +517,11 @@ O lote 23a preparou essa tela: o diagnóstico agora também diz **de quando** s�
 números (textos de filtro de período, com a opção escolhida), para o #47 se resolver já
 na primeira rodada da cliente.
 
+O lote 24 fechou o último jeito de a extensão falhar sem contar: exceção no meio da
+leitura. Ela não mata mais o observer em silêncio — vira registro, aviso vermelho no
+popup e linha no relatório. Junto veio a lição da 0.1.7: mudança sem caso de teste
+abriu um buraco (data inválida virando milhão de visitas) que ninguém teria visto.
+
 ---
 
 ## 8. Ordem de correção sugerida
@@ -500,7 +535,9 @@ na primeira rodada da cliente.
 | — | 21 — Robustez geral (relato da cliente) | #57–#61, #49, #54; parte de #38, #47, #53 | ✅ | Feito em 15/09. |
 | — | 22 — Tudo que não dependia da tela real | #21, #38, #40, #46, #53; limite de custo; versão no popup; busca desligada | ✅ | Feito em 15/09. |
 | — | 23a — Período no diagnóstico | #47 (preparo) | ✅ | Feito em 15/09. |
-| 1 | **Commit + verificação manual + decisão do repositório** | #21, #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.1.6 para a cliente. |
+| — | 0.1.7 — robustez (Pedro) | — | ✅ | Feito em 15/09, testado no lote 24. |
+| — | 24 — Erro visível + dívida da 0.1.7 | — | ✅ | Feito em 17/09. |
+| 1 | **Commit + verificação manual + decisão do repositório** | #21, #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.1.8 para a cliente. |
 | 2 | **★ Ação — capturar "Minhas publicações" real + conferência de 3 anúncios** | — | ⬜ | "Copiar diagnóstico" na tela (`telaAtual`, com `resumoDasRecusas`) e passo 7 do guia. Decide #47 e valida #38, #48 e #57. |
 | 3 | **23b — Período no rastro** | #47 | ⬜ | Com o `telaAtual.periodo` da tela real, registrar o recorte (7/30 dias) junto do rastro. |
 | 4 | **Decisão — religar a busca automática?** | — | ⬜ | Só se a tela real mostrar que o HTML buscado traz os números. |
@@ -564,5 +601,7 @@ paramos.
 | 22 — Tudo que não dependia da tela real | ✅ feito | 15/09/2026 | Pedido do Pedro: "pode fazer tudo". **Limite de custo:** `LIMITE_TEXTO_POR_NIVEL = 5000` em `valorDoRotulo` (medido ~7 ms por leitura em bloco de 100 mil caracteres). **#21:** `src/gravacao.js` (regra pura de mesclar, carregada no SW e nas abas) + fila única no `background.js` (`gravarNaFila`, mensagem "salvar"); o coletor manda gravar e, sem resposta, grava na aba (`gravarNestaAba`); `comCache` e a mesclagem saíram do coletor. **#38:** `codigosDentroDe` prefere o item quando o card também tem link de catálogo/user product. **#40 (decisão):** `anotarImplausiveis` não descarta; `calcular.vendasAcimaDasVisitas`; alerta no painel. **#46 (decisão):** sem painel "Sem dados" (`montarPainelVazio` removido). **Busca automática (decisão):** `BUSCA_AUTOMATICA_LIGADA = false`; guia: a extensão não faz nada sozinha. **Popup:** versão ao lado do nome. **#53:** harness com `gravacao.js` e service worker (três gravações simultâneas, remetente alheio, busca fora do ML e sem https) → **191/191**; teste em DOM real versionado (`teste/servidor-teste.js`, `teste/rodar-no-navegador.html`) → **31/31**. `manifest.json` → **0.1.5** (content_scripts com `gravacao.js`), zip gerado. |
 | 23a — Período no diagnóstico | ✅ feito | 15/09/2026 | Pedido do Pedro: preparar o diagnóstico para o #47. `telaAtual.periodo` (e `mlmetrics_diagnostico.periodo`): textos curtos de filtro de período (`ehTextoDePeriodo`, vocabulário fechado), com `marcado` pela opção de `<select>`, radio/checkbox do `<label>` ou `aria-selected/checked/pressed/current` (`estadoDoControle`); intervalo de datas também no valor de campo (sem campo escondido, senha, e-mail ou telefone); até 20, sem repetição, sem o painel. Só leitura: gravação e painel não mudam. Guia: o diagnóstico traz o período. Harness **221/221**; navegador **37/37** (controles reais). `manifest.json` → **0.1.6**, zip gerado. |
 | Commit + verificação manual + repositório | ⬜ a fazer | | Seção 4 (Pedro). |
-| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.1.6: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
+| 0.1.7 — robustez (Pedro) | ✅ feito | 15/09/2026 | Commit `2fedda6`, direto por ele: tempo limite do plano B, `ehData` por calendário, `try/catch` no `new URL`, `lastError.message`. Entrou sem teste e sem registro — dívida paga no lote 24. |
+| 24 — Erro visível | ✅ feito | 17/09/2026 | Pedido do Pedro ("o que dá para melhorar"). **Falha silenciosa:** `coletar()` e o diagnóstico em `try/catch`; `registrarErro` grava `mlmetrics_erro` (onde, mensagem, 3 linhas de pilha, host, tela mascarada, hora, versão) com trava de 1 min; aviso vermelho no popup e `ultimoErro` no relatório. **Dívida da 0.1.7:** `motivoDoNumero` recusa a forma de data com ponto — sem isso, `31.04.2023` virava 31.042.023 visitas. Harness **231/231**, navegador **42/42**. `manifest.json` → **0.1.8**, zip gerado. |
+| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.1.8: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |

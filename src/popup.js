@@ -23,11 +23,17 @@
   // "Minhas publicacoes", sem levar id de vendedor ou de anuncio junto.
   const CHAVE_ORIGENS = "mlmetrics_origens";
 
+  // Ultimo erro inesperado da leitura (gravado pelo coletor). Aparece em
+  // vermelho no topo e vai no relatorio: erro que ninguem ve e o mesmo que
+  // erro nenhum, e aqui ele explica por que nada apareceu na tela.
+  const CHAVE_ERRO = "mlmetrics_erro";
+
   // Toda chave da extensao no storage comeca com este prefixo. O botao
   // "Limpar dados guardados" apaga pelo prefixo - ver la o porque.
   const PREFIXO_CHAVES = "mlmetrics_";
 
   const resumo = document.getElementById("resumo");
+  const erro = document.getElementById("erro");
   const lista = document.getElementById("lista");
   const aviso = document.getElementById("aviso");
   const campoDiagnostico = document.getElementById("diagnostico");
@@ -124,12 +130,37 @@
   }
 
   /**
+   * Mostra em vermelho o ultimo erro inesperado da leitura, se houver.
+   *
+   * A mensagem tecnica fica so no relatorio: quem le isto nao e programadora
+   * e nao tem o que fazer com ela. O que precisa aparecer e (a) que algo
+   * falhou, (b) que pode ser por isso que faltam numeros e (c) o que fazer
+   * em seguida.
+   *
+   * @param {Object|undefined} registro o que o coletor gravou em mlmetrics_erro
+   */
+  function mostrarErro(registro) {
+    if (!registro || !registro.mensagem) {
+      erro.hidden = true;
+      return;
+    }
+
+    erro.hidden = false;
+    erro.textContent =
+      "A extensão teve um erro ao ler uma tela em " +
+      formatarData(registro.quando) + ". Pode ser por isso que estão " +
+      "faltando números. Clique em \"Copiar diagnóstico\" e me mande o texto.";
+  }
+
+  /**
    * Le o storage e desenha o estado atual.
    */
   function desenhar() {
     try {
-      chrome.storage.local.get([CHAVE_CACHE, CHAVE_DIAGNOSTICO], function (guardado) {
+      chrome.storage.local.get([CHAVE_CACHE, CHAVE_DIAGNOSTICO, CHAVE_ERRO], function (guardado) {
         if (chrome.runtime.lastError) return;  // contexto invalidado
+
+        mostrarErro(guardado[CHAVE_ERRO]);
 
         const cache = guardado[CHAVE_CACHE] || {};
         const codigos = Object.keys(cache);
@@ -291,7 +322,7 @@
   function montarRelatorio(telaAtual) {
     try {
       chrome.storage.local.get(
-        [CHAVE_CACHE, CHAVE_DIAGNOSTICO, CHAVE_ORIGENS],
+        [CHAVE_CACHE, CHAVE_DIAGNOSTICO, CHAVE_ORIGENS, CHAVE_ERRO],
         function (guardado) {
           if (chrome.runtime.lastError) return;  // contexto invalidado
 
@@ -303,6 +334,10 @@
             // A tela que a pessoa esta olhando, lida no clique: o que o
             // coletor enxerga nela e o que capturaria agora.
             telaAtual: telaAtual,
+            // Erro inesperado da leitura, se aconteceu. Vem antes do resto
+            // porque, quando existe, e a explicacao mais provavel para "nao
+            // apareceu nada".
+            ultimoErro: guardado[CHAVE_ERRO] || null,
             // As telas de vendedor reconhecidas (ate 3), mascaradas. Sao o
             // caminho mais direto para confirmar que estamos olhando a pagina
             // certa.

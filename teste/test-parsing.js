@@ -1128,6 +1128,32 @@ testar("#40: o diagnostico anota o aviso", true,
   recusasAcima.some(function (r) { return /aviso/.test(r.motivo); }));
 
 console.log("");
+console.log("=== 0.1.7 e lote 24 - data invalida, URL quebrada ===");
+// A 0.1.7 apertou o ehData (dia por mes). Isso AFROUXOU o motivoDoNumero:
+// "31.04.2023" nao existe no calendario, entao deixou de ser data - e, sem a
+// regra de FORMA, virava 31.042.023 visitas. Estes casos prendem os dois
+// lados da regra.
+testar("ehData: 31 de abril nao e data", false, ehData("31.04.2023"));
+testar("ehData: 29 de fevereiro e data", true, ehData("29.02.2024"));
+testar("ehData: 30 de fevereiro nao e data", false, ehData("30.02.2024"));
+testar("ehData: 31 de dezembro e data", true, ehData("31.12.2023"));
+testar("data invalida com ponto nao vira metrica", null,
+  numeroAntesDe("Publicado em 31.04.2023 visitas", "visita"));
+testar("data invalida com barra nao vira metrica", null,
+  numeroAntesDe("Visitas 31/04/2023", "visita"));
+testar("milhar com ponto continua sendo metrica", 1299500,
+  numeroAntesDe("1.299.500 visitas", "visita"));
+
+// A 0.1.7 passou a tolerar URL invalida (extensao rodando em pagina com
+// endereco estranho). A leitura nao pode parar por causa disso, e o rastro
+// precisa dizer que a tela nao pode ser identificada.
+testar("url invalida nao e vitrine", false, ehPaginaDeCompra("nao-e-uma-url"));
+const rUrlInvalida = varrerPagina(documentoDa(corpoVendedor), "nao-e-uma-url");
+testar("url invalida: a leitura continua", 359, rUrlInvalida["MLB3456789012"].visitas);
+testar("url invalida: o rastro diz que a tela e desconhecida", "(url invalida)",
+  rUrlInvalida["MLB3456789012"].origem.visitas.tela);
+
+console.log("");
 console.log("=== gravacao.js - a regra de mesclar no cache ===");
 const T0 = 1000000;
 const origemDe = function (trecho) { return { trecho: trecho, tela: "/anuncios/lista" }; };
