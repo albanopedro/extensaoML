@@ -25,7 +25,7 @@
 
 <h1>ML Metrics — teste no navegador</h1>
 <p>
-  Roda o <code>coletor.js</code> e o <code>content.js</code> de verdade sobre as
+  Roda os arquivos da extensão de verdade, na ordem do manifest, sobre as
   fixtures fictícias, com um <code>chrome</code> falso (storage em memória).
   Nada sai deste computador.
 </p>
@@ -252,13 +252,20 @@
     '<input type="text" value="01/08/2026 - 30/08/2026">' +
     '</div>';
 
+  // Os arquivos da extensao na MESMA ORDEM do manifest: cada um usa as
+  // variaveis globais dos que vieram antes (MLMetricsLeitura, MLMetricsCalculo).
+  // Que o manifest segue esta ordem, quem confere e o teste em Node.
+  const SCRIPTS_COLETOR = ["/src/gravacao.js", "/src/leitura.js", "/src/diagnostico.js", "/src/coletor.js"];
+  const SCRIPTS_PAINEL = ["/src/calculo.js", "/src/content.js"];
+  const SCRIPTS_TODOS = SCRIPTS_COLETOR.concat(SCRIPTS_PAINEL);
+
   async function rodar() {
     // --- 1. Coletor sobre "Minhas publicacoes" ------------------------------
     const armazem1 = {};
     const tela = await abrirFixture(
       "/teste/publicacoes.html",
       armazem1,
-      ["/src/gravacao.js", "/src/coletor.js"],
+      SCRIPTS_COLETOR,
       function (documento) {
         documento.body.insertAdjacentHTML("afterbegin", FILTRO_DE_PERIODO);
         documento.body.insertAdjacentHTML("beforeend", CARDS_EXTRAS);
@@ -321,7 +328,7 @@
     const anuncio = await abrirFixture(
       "/teste/MLB-1111111111-anuncio.html",
       armazem2,
-      ["/src/gravacao.js", "/src/coletor.js", "/src/content.js"]
+      SCRIPTS_TODOS
     );
     await esperar(700);
 
@@ -349,7 +356,7 @@
     const alerta = await abrirFixture(
       "/teste/MLB-1111111111-anuncio.html?caso=alerta",
       armazem3,
-      ["/src/content.js"]
+      SCRIPTS_PAINEL
     );
     await esperar(700);
 
@@ -363,7 +370,7 @@
     const semDados = await abrirFixture(
       "/teste/MLB-1111111111-anuncio.html?caso=sem-dados",
       armazem4,
-      ["/src/content.js"]
+      SCRIPTS_PAINEL
     );
     await esperar(700);
 
@@ -380,7 +387,7 @@
     const catalogo = await abrirFixture(
       "/teste/MLB-1111111111-anuncio.html?pdp_filters=item_id:MLB9999999999",
       armazem5,
-      ["/src/content.js"]
+      SCRIPTS_PAINEL
     );
     await esperar(700);
 
@@ -401,7 +408,7 @@
     await abrirFixture(
       "/teste/publicacoes.html?caso=erro",
       armazemErro,
-      ["/src/gravacao.js", "/src/coletor.js"],
+      SCRIPTS_COLETOR,
       function (documento) {
         documento.createTreeWalker = function () {
           throw new Error("DOM em estado inesperado");
@@ -423,7 +430,7 @@
     await abrirFixture(
       "/teste/publicacoes.html?caso=sw-mudo",
       armazemMudo,
-      ["/src/gravacao.js", "/src/coletor.js"],
+      SCRIPTS_COLETOR,
       null,
       { sendMessageMudo: true }
     );

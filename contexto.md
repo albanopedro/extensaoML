@@ -3,7 +3,7 @@
 > Cole este arquivo inteiro no início de uma nova conversa. Ele contém tudo que é
 > preciso saber para continuarmos corrigindo os problemas sem refazer a análise.
 >
-> **Atualizado em 17/09/2026, depois do lote 24 (erro visível em vez de falha silenciosa).** O que falta fazer está
+> **Atualizado em 17/09/2026, depois do lote 25 (coletor.js dividido em arquivos menores).** O que falta fazer está
 > na **seção 5**. O que já foi feito está resumido e sinalizado na **seção 6**.
 
 ---
@@ -27,7 +27,10 @@ envolvido → propõe a correção → aplicamos.**
 - **Não mexa em item que eu não pedi.** Se notar algo novo, aponte no chat e siga com
   o que foi combinado.
 - **Não invente refatoração grande.** A base é pequena, sem build, sem dependências e
-  sem framework — mantenha assim. JavaScript puro, ES5/ES6 simples, IIFE.
+  sem framework — mantenha assim. JavaScript puro, ES5/ES6 simples, IIFE. Os
+  arquivos de `src/` conversam por variáveis globais (`MLMetricsLeitura`,
+  `MLMetricsDiagnostico`, `MLMetricsCalculo`, `MLMetricsGravacao`), na ordem do
+  `manifest.json` — cada arquivo depois de quem ele usa (o harness confere).
 - **Preserve o estilo dos comentários.** O código é fortemente comentado em português
   sem acentos, explicando o *porquê* de cada decisão. Toda alteração precisa manter
   esse padrão, inclusive atualizando o comentário quando o comportamento mudar.
@@ -35,7 +38,7 @@ envolvido → propõe a correção → aplicamos.**
 - **Sem acentos nos comentários de código** (o projeto segue isso). Em texto de
   interface exibido para a usuária, acentos normais.
 - **Antes de corrigir, confirme a linha.** Os números de linha da seção 5 valem para o
-  estado do código em **17/09/2026, depois do lote 24**. Depois de cada correção eles
+  estado do código em **17/09/2026, depois do lote 25**. Depois de cada correção eles
   saem do lugar.
 - **Toda correção entra com caso de teste**: no harness (`node teste/test-parsing.js`)
   quando a função for testável fora do navegador; na página de teste
@@ -56,7 +59,7 @@ envolvido → propõe a correção → aplicamos.**
 (visitas, vendas, conversão, receita estimada) nos anúncios do Mercado Livre de uma
 vendedora.
 
-Caminho: `C:\codes\extensaoML` · versão no manifest: **0.1.8**
+Caminho: `C:\codes\extensaoML` · versão no manifest: **0.1.9**
 
 **Restrição central do projeto:** a API pública do Mercado Livre devolve 403 e
 exigiria OAuth ou cookie de sessão. Por isso a extensão **raspa a tela** em vez de
@@ -74,26 +77,34 @@ extensaoML/
 │                               icons e src). E ESTE zip que vai para a cliente.
 ├── icons/                   <- icon16/32/48/128.png
 ├── src/
-│   ├── background.js (~182) SERVICE WORKER (MV3). GRAVA o cache para todas
+│   ├── background.js (~184) SERVICE WORKER (MV3). GRAVA o cache para todas
 │   │                        as abas, uma leitura de cada vez (#21), e busca
 │   │                        telas para a atualizacao automatica (desligada).
+│   │
+│   │   Scripts de conteudo, NA ORDEM DO MANIFEST (cada um usa os de cima):
 │   ├── gravacao.js (~185)   A REGRA de mesclar uma leitura no cache. Roda no
 │   │                        service worker e, como plano B, nas abas.
-│   ├── coletor.js (~2015)   CAPTURA. Roda em toda pagina do ML. Le cada
-│   │                        rotulo pela fila de numeros e rotulos e manda
-│   │                        gravar COM o rastro de origem de cada numero.
-│   │                        Responde o diagnostico do popup, inclusive por
-│   │                        que cada numero foi recusado.
-│   ├── content.js (~747)    EXIBE. Acha o codigo do item na URL, le o
-│   │                        storage e monta o painel azul - so com numero
-│   │                        que tem rastro. Preco so de dado estruturado.
+│   ├── leitura.js (~1084)   LE a tela, sem chrome.*: fila de numeros e
+│   │                        rotulos, motivo de recusa, card do anuncio,
+│   │                        varredura com rastro, vitrine, caminho mascarado.
+│   ├── diagnostico.js (~353) MONTA o diagnostico, sem chrome.*: amostras,
+│   │                        periodo, recusas, diagnosticarTela.
+│   ├── coletor.js (~696)    ORQUESTRA a captura: observer, gravacao (SW ou
+│   │                        plano B), diagnostico guardado, erros
+│   │                        (registrarErro), resposta ao popup.
+│   ├── calculo.js (~353)    CONTAS e FORMATOS do painel, sem DOM: codigo da
+│   │                        URL, numero com prova, conversao, receita, idade.
+│   ├── content.js (~435)    EXIBE. Le o storage, o preco estruturado e monta
+│   │                        o painel azul - so com numero que tem rastro.
+│   │
 │   ├── content.css (~132)   Estilo do painel e do aviso verde.
 │   └── popup.html / popup.js (~371)  Painel de controle (mostra a versao): lista o capturado
 │                            com a origem de cada numero, limpa dados, copia
 │                            diagnostico da aba aberta.
 ├── teste/
-│   ├── test-parsing.js             Harness Node (231 casos, 231/231 PASS em 17/09),
-│   │                               inclusive gravacao.js e o service worker.
+│   ├── test-parsing.js             Harness Node (237 casos, 237/237 PASS em 17/09):
+│   │                               carrega leitura/diagnostico/calculo/gravacao
+│   │                               como sao, o service worker e a ordem do manifest.
 │   ├── servidor-teste.js           Servidor local (127.0.0.1, lista fechada).
 │   ├── rodar-no-navegador.html     Teste em DOM real (42 casos, 42/42 PASS).
 │   ├── publicacoes.html            Fixture da tela "Minhas publicacoes", com gabarito.
@@ -120,7 +131,8 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
 
 1. **`coletor.js`** roda em toda página do ML (`document_idle`) e a cada mutação do
    DOM — inclusive texto e link trocados no lugar (debounce de 600 ms, ignorando lotes
-   só com mutações da própria extensão). As travas, em ordem:
+   só com mutações da própria extensão). Ele orquestra; as travas abaixo moram em
+   `leitura.js` (`MLMetricsLeitura`) desde o lote 25. As travas, em ordem:
    1. `ehPaginaDeCompra(url)` — vitrine pública (host `produto.`/`articulo.` ou rota
       `/up/MLB…` / `/p/MLB…`, inclusive `/p/MLB…/s`) → não coleta.
    2. `paginaMencionaVisita(doc)` — sem "visita" fora do painel → nada.
@@ -148,7 +160,8 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
    **Exceção inesperada na leitura não é mais silenciosa** (lote 24): `coletar()` inteiro
    fica em `try/catch` e `registrarErro` grava `mlmetrics_erro` (função, mensagem, 3
    linhas de pilha, tela mascarada, versão), com trava de 1 min para a mesma mensagem.
-2. **`content.js`** roda em URL que contém `MLB…`: monta os códigos candidatos
+2. **`content.js`** roda em URL que contém `MLB…` (as contas e os formatos citados
+   aqui moram em `calculo.js`, `MLMetricsCalculo`): monta os códigos candidatos
    (`codigosDaPagina`: `item_id`/`wid` da query ou do `#` primeiro, o caminho por
    último), usa o primeiro com número provado (`escolherRegistro`), **descarta número
    sem rastro de origem** (`somenteComOrigem`), lê o preço **só de dado estruturado**
@@ -173,7 +186,7 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
    - A lista mostra, embaixo de cada número, o rastro (trecho « », tela, hora).
      Registro sem rastro aparece como "sem origem (versão antiga)".
    - "Copiar diagnóstico" pede à **aba ativa** um diagnóstico na hora
-     (`chrome.tabs.sendMessage` → `diagnosticarTelaAtual`) e monta o relatório:
+     (`chrome.tabs.sendMessage` → `MLMetricsDiagnostico.diagnosticarTela`) e monta o relatório:
      `versao`, `telaAtual` (host, caminho mascarado, vitrine, mencionaVisita,
      capturariaAgora, **periodo** — textos de filtro de período, com `marcado` na opção
      escolhida (#47) —, **resumoDasRecusas** e **recusas** — por que cada rótulo não
@@ -199,10 +212,11 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
 | Pedido do Pedro (15/09) — lote 23a | ✅ **período no diagnóstico** (preparo do #47): `telaAtual.periodo` traz os textos de filtro de período da tela ("Últimos 30 dias", intervalo de datas, abas, lista) e marca a opção escolhida. Não muda o que é gravado nem o painel. |
 | Pedro (15/09) — 0.1.7 | ✅ robustez feita por ele: tempo limite do plano B (SW que não responde), `ehData` validando dia por mês, `try/catch` em volta do `new URL` (varrer e vitrine), `lastError.message` nas falhas de gravação. **Entrou sem caso de teste e sem registro aqui** — coberto no lote 24. |
 | Pedido do Pedro (17/09) — lote 24 | ✅ **erro visível**: `coletar()` e o diagnóstico em `try/catch`, `mlmetrics_erro` no storage, aviso vermelho no popup e `ultimoErro` no relatório. Mais os testes que faltavam da 0.1.7 e o buraco que ela abriu (`31.04.2023` virava 31.042.023) fechado em `motivoDoNumero`. |
+| Pedido do Pedro (17/09) — lote 25 | ✅ **`coletor.js` dividido** (2.015 → 696 linhas): a leitura foi para `leitura.js` e a montagem do diagnóstico para `diagnostico.js`; as contas e formatos do painel saíram do `content.js` para `calculo.js`. O harness **não recorta mais função do texto-fonte**: carrega os arquivos como são. Nenhum comportamento mudou. Junto, os quatro `var` da 0.1.7 viraram `const`/`let`. |
 | Revisão 1 — resíduo #21 | ✅ corrida entre abas resolvida no lote 22 (gravação única no service worker). |
-| Harness | **231/231 PASS** (+10 casos no lote 24: data inválida com ponto, URL quebrada e o `ehData` da 0.1.7). `node --check` ok em todos os JS. |
+| Harness | **237/237 PASS** (+6 no lote 25: a ordem do `manifest.json` — cada arquivo depois de quem define a global que ele usa, e todo módulo na lista). `node --check` ok em todos os JS. |
 | Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **42/42 PASS** (+5 no lote 24: erro na leitura virando registro e o plano B por tempo da 0.1.7). Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
-| Pacote | `dist\ML-Metrics-0.1.8.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
+| Pacote | `dist\ML-Metrics-0.1.9.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
 
 ### ⚠️ Repositório público — decisão do Pedro
 
@@ -219,7 +233,7 @@ git/GitHub — é ação do Pedro.
 O harness e o teste no navegador (`teste/rodar-no-navegador.html`) cobrem os itens 1, 3,
 5, 6 e 7 com `chrome` falso, e o item 8 no Node; falta confirmar com a extensão de
 verdade (mensagens popup ↔ aba ↔ service worker e storage reais). Com a extensão
-carregada (0.1.8):
+carregada (0.1.9):
 
 1. **#44** — numa aba do ML, ícone → "Copiar diagnóstico": o relatório tem `telaAtual`
    com `host`, `caminho` mascarado, `vitrine`, `mencionaVisita`, `capturariaAgora`,
@@ -243,13 +257,13 @@ carregada (0.1.8):
    trecho de cada um.
 8. **#21** — com duas telas de vendedor abertas em abas diferentes (F5 nas duas), o
    popup lista os anúncios das duas; nenhuma apaga o que a outra gravou.
-9. **Popup** — o título mostra "ML Metrics v0.1.8".
+9. **Popup** — o título mostra "ML Metrics v0.1.9".
 
 ### Ação pendente (depois da verificação)
 
-1. Rodar `empacotar.ps1` e enviar `dist\ML-Metrics-0.1.8.zip` à cliente.
+1. Rodar `empacotar.ps1` e enviar `dist\ML-Metrics-0.1.9.zip` à cliente.
 2. A cliente segue **"Depois de uma atualização"** do guia: substituir os arquivos na
-   mesma pasta, recarregar a extensão, conferir a versão **0.1.8** (também no popup),
+   mesma pasta, recarregar a extensão, conferir a versão **0.1.9** (também no popup),
    **F5** nas abas do ML.
 3. A cliente clica **"Limpar dados guardados"** (agora apaga também as origens
    envenenadas pelo build antigo).
@@ -306,7 +320,7 @@ código**: são decisões e ações do Pedro fora do repositório/extensão em s
 | # | Sev. | Título | Status | Quem resolve |
 |---|---|---|---|---|
 | #50 | MÉDIO | Privacidade no repositório GitHub (resíduo: repo público + histórico) | ⚠️ parcial | Pedro (GitHub) |
-| — | — | Commit do lote 24, verificação manual (9 itens), envio da 0.1.8 à cliente | ⬜ | Pedro |
+| — | — | Commit do lote 25, verificação manual (9 itens), envio da 0.1.9 à cliente | ⬜ | Pedro |
 
 ---
 
@@ -315,10 +329,10 @@ código**: são decisões e ações do Pedro fora do repositório/extensão em s
 #### #47 [MÉDIO] Período (7/30 dias) não é registrado — ⚠️ parcial
 
 - **Já feito (lote 21):** o observer passou a ver texto e link trocados no lugar
-  (`characterData` e `attributes: href`, `src/coletor.js:1783`) e só ignora um lote de
+  (`characterData` e `attributes: href`, no fim de `src/coletor.js`) e só ignora um lote de
   mutações quando **todas** são da extensão (`every`, `:1760`).
 - **Já feito (lote 23a):** o diagnóstico traz `periodo` (`coletarTextosDePeriodo`,
-  `src/coletor.js`): textos curtos de filtro de período da tela — "Últimos 30 dias",
+  hoje em `src/diagnostico.js`): textos curtos de filtro de período da tela — "Últimos 30 dias",
   "Este mês", intervalo de datas, inclusive no valor de um campo — com `marcado` quando
   o controle (lista, radio, aba, botão) diz qual está escolhido. Vocabulário fechado
   (`ehTextoDePeriodo`), no máximo 20 textos, sem campo escondido, de senha, e-mail ou
@@ -472,6 +486,22 @@ quatro mudanças com teste:
 | Buraco aberto pela 0.1.7 | `ehData` mais rigoroso deixou de reconhecer data inválida, e `31.04.2023` passava a valer **31.042.023 visitas**. `motivoDoNumero` passou a recusar a **forma** de data com ponto (`\d{1,2}.\d{1,2}.\d{2,4}`); milhar de verdade ("1.299.500") não casa porque o grupo do meio tem três dígitos. |
 | Testes que faltavam | Harness +10 (dia por mês, data inválida com ponto e com barra, milhar preservado, URL quebrada na varredura e na vitrine) → **231/231**. Navegador +5 (erro na leitura virando registro, sem inventar métrica; plano B por tempo com service worker mudo) → **42/42**. `manifest.json` → **0.1.8**, zip gerado. |
 
+### Lote 25 — `coletor.js` dividido (17/09/2026)
+
+Pedido do Pedro, depois da sugestão "quebrar o coletor.js e apagar o extrator do harness".
+**Nenhum comportamento mudou**: é o mesmo código em outros arquivos.
+
+| Item | O que foi feito |
+|---|---|
+| Divisão | `coletor.js` (2.015 linhas) virou `leitura.js` (1.084: fila de peças, motivos, card, varredura, vitrine, caminho mascarado), `diagnostico.js` (353: amostras, período, `diagnosticarTela`, recusas) e `coletor.js` (696: observer, gravação, diagnóstico guardado, erros, popup). Do `content.js` (747) saiu `calculo.js` (353: códigos da URL, número com prova, contas, formatos); ficaram 435 linhas. Cada módulo novo segue o padrão do `gravacao.js`: `var MLMetricsX = (function () { … return {…}; })();`. |
+| Como foi feito | Um script copiou o **texto exato** de cada função (comentários inclusive) para o arquivo novo e prefixou as chamadas entre arquivos (`MLMetricsLeitura.varrerPagina`…). Conferido: toda linha do original está em algum arquivo novo, menos as 19 alteradas de propósito; nenhuma chamada entre arquivos ficou sem prefixo. |
+| Mudança de assinatura | `diagnosticarTelaAtual()` virou `diagnosticarTela(doc, local)`: o coletor passa `document` e `window.location`. Só isso deixou de ler global. |
+| Manifest | `content_scripts.js` na ordem `gravacao → leitura → diagnostico → coletor → calculo → content`. Fora de ordem, o script morre ao carregar sem nem o `registrarErro` para contar — por isso o harness confere a ordem (e falha, testado trocando a ordem de propósito). |
+| Harness | Saíram o scanner de chaves (`fimDoBloco`) e os extratores (`extrairFuncao`, `extrairConst…`, `eval`): `carregarModulo` roda cada arquivo com `new Function`, como o navegador. +6 casos (ordem do manifest) → **237/237**. |
+| Teste no navegador | Listas `SCRIPTS_COLETOR`, `SCRIPTS_PAINEL` e `SCRIPTS_TODOS` na ordem do manifest → **42/42**. |
+| Acabamento (item 3) | Os quatro `var` da 0.1.7 viraram `const`/`let`; `ehPaginaDeCompra` passou a ler a URL uma vez só. |
+| Versão | `manifest.json` → **0.1.9**; zip com 15 entradas, inclusive os três arquivos novos. |
+
 ---
 
 ## 7. Leitura de conjunto (o diagnóstico de fundo)
@@ -522,6 +552,11 @@ leitura. Ela não mata mais o observer em silêncio — vira registro, aviso ver
 popup e linha no relatório. Junto veio a lição da 0.1.7: mudança sem caso de teste
 abriu um buraco (data inválida virando milhão de visitas) que ninguém teria visto.
 
+O lote 25 não mudou o que a extensão faz, e sim o custo de mexer nela: a leitura, o
+diagnóstico e as contas do painel viraram arquivos próprios, e o teste passou a
+carregar esses arquivos como eles são. Mudar o formato de uma função não quebra mais o
+teste por engano — agora, se o teste quebra, é a função.
+
 ---
 
 ## 8. Ordem de correção sugerida
@@ -537,7 +572,8 @@ abriu um buraco (data inválida virando milhão de visitas) que ninguém teria v
 | — | 23a — Período no diagnóstico | #47 (preparo) | ✅ | Feito em 15/09. |
 | — | 0.1.7 — robustez (Pedro) | — | ✅ | Feito em 15/09, testado no lote 24. |
 | — | 24 — Erro visível + dívida da 0.1.7 | — | ✅ | Feito em 17/09. |
-| 1 | **Commit + verificação manual + decisão do repositório** | #21, #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.1.8 para a cliente. |
+| — | 25 — `coletor.js` dividido + harness sem extrator | — | ✅ | Feito em 17/09. |
+| 1 | **Commit + verificação manual + decisão do repositório** | #21, #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.1.9 para a cliente. |
 | 2 | **★ Ação — capturar "Minhas publicações" real + conferência de 3 anúncios** | — | ⬜ | "Copiar diagnóstico" na tela (`telaAtual`, com `resumoDasRecusas`) e passo 7 do guia. Decide #47 e valida #38, #48 e #57. |
 | 3 | **23b — Período no rastro** | #47 | ⬜ | Com o `telaAtual.periodo` da tela real, registrar o recorte (7/30 dias) junto do rastro. |
 | 4 | **Decisão — religar a busca automática?** | — | ⬜ | Só se a tela real mostrar que o HTML buscado traz os números. |
@@ -603,5 +639,6 @@ paramos.
 | Commit + verificação manual + repositório | ⬜ a fazer | | Seção 4 (Pedro). |
 | 0.1.7 — robustez (Pedro) | ✅ feito | 15/09/2026 | Commit `2fedda6`, direto por ele: tempo limite do plano B, `ehData` por calendário, `try/catch` no `new URL`, `lastError.message`. Entrou sem teste e sem registro — dívida paga no lote 24. |
 | 24 — Erro visível | ✅ feito | 17/09/2026 | Pedido do Pedro ("o que dá para melhorar"). **Falha silenciosa:** `coletar()` e o diagnóstico em `try/catch`; `registrarErro` grava `mlmetrics_erro` (onde, mensagem, 3 linhas de pilha, host, tela mascarada, hora, versão) com trava de 1 min; aviso vermelho no popup e `ultimoErro` no relatório. **Dívida da 0.1.7:** `motivoDoNumero` recusa a forma de data com ponto — sem isso, `31.04.2023` virava 31.042.023 visitas. Harness **231/231**, navegador **42/42**. `manifest.json` → **0.1.8**, zip gerado. |
-| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.1.8: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
+| 25 — `coletor.js` dividido | ✅ feito | 17/09/2026 | Pedido do Pedro (itens 2 e 3 das melhorias). `leitura.js` (`MLMetricsLeitura`), `diagnostico.js` (`MLMetricsDiagnostico`) e `calculo.js` (`MLMetricsCalculo`) saíram de `coletor.js` (2.015 → 696) e `content.js` (747 → 435), com o texto exato de cada função movido por script e as chamadas entre arquivos prefixadas. `diagnosticarTelaAtual()` → `diagnosticarTela(doc, local)`. Manifest na ordem de dependência. Harness sem extrator (`carregarModulo`), +6 casos da ordem do manifest → **237/237**; navegador **42/42**. Os quatro `var` da 0.1.7 → `const`/`let`. `manifest.json` → **0.1.9**, zip gerado. |
+| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.1.9: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |

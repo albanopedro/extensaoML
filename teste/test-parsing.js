@@ -1,10 +1,11 @@
 // ============================================================================
-// TESTE DE PARSING - roda as funcoes PURAS do coletor.js e do content.js
-// fora do navegador
+// TESTE DE PARSING - roda as funcoes PURAS da extensao fora do navegador
 //
-// Por que existe? Os dois arquivos vivem dentro de IIFEs, entao nada deles
-// e exportado e nada roda sem um navegador. Este arquivo extrai as funcoes
-// e constantes de parsing por marcadores de texto, avalia em Node e cobra:
+// Por que existe? A leitura da tela e as contas do painel sao o coracao da
+// extensao, e mais de uma regra delas ja quebrou de um jeito que so um caso
+// de teste mostraria. Este arquivo carrega os modulos puros de src/
+// (leitura.js, diagnostico.js, calculo.js, gravacao.js) do jeito que eles sao
+// e cobra:
 //
 //   - os casos da auditoria (problemas #1, #4, #23, #24 do contexto.md)
 //   - o gabarito das fixtures de teste/ (publicacoes.html e o anuncio)
@@ -19,11 +20,13 @@
 //   - a fila de numeros e rotulos (valor antes ou depois, ambiguo, motivos)
 //   - o diagnostico das recusas (por que um numero nao virou dado)
 //   - o painel: codigos da pagina, preco estruturado, idade e formato
+//   - a ordem dos arquivos no manifest (cada um depois de quem ele usa)
 //
 // Sem navegador de proposito: nada aqui toca em chrome.storage, e o DOM
-// entra por um stub fiel das poucas APIs que o coletor usa (mais abaixo).
+// entra por um stub fiel das poucas APIs que a leitura usa (mais abaixo).
 // MutationObserver, mensagens e o storage de verdade ficam de fora - esses
-// se testam no navegador (ver "Verificacao manual" no contexto.md).
+// se testam no navegador (teste/rodar-no-navegador.html) e na verificacao
+// manual (contexto.md).
 //
 // Como rodar (de qualquer pasta do projeto):
 //
@@ -38,254 +41,47 @@
 const fs = require("fs");
 const path = require("path");
 
-const CAMINHO_COLETOR = path.join(__dirname, "..", "src", "coletor.js");
-const CAMINHO_CONTENT = path.join(__dirname, "..", "src", "content.js");
-const CAMINHO_GRAVACAO = path.join(__dirname, "..", "src", "gravacao.js");
 const CAMINHO_BACKGROUND = path.join(__dirname, "..", "src", "background.js");
-const fonte = fs.readFileSync(CAMINHO_COLETOR, "utf8");
-const fonteContent = fs.readFileSync(CAMINHO_CONTENT, "utf8");
 
 // ----------------------------------------------------------------------------
-// Extracao por marcadores de texto
+// Carga dos modulos
 // ----------------------------------------------------------------------------
 
 /**
- * Acha o "}" que fecha o bloco aberto na posicao "abre", pulando o que nao e
- * codigo: comentarios, strings e regex literais. Contar chaves as cegas
- * quebrava a extracao com um "{" dentro de um comentario, de uma string ou
- * de uma regex.
+ * Carrega um arquivo de src/ do jeito que o navegador carrega: o arquivo
+ * define uma variavel global (MLMetricsLeitura, por exemplo) e os que vem
+ * depois dele no manifest usam essa variavel.
  *
- * @returns {number} posicao do "}" que fecha, ou -1
+ * new Function roda o arquivo num escopo proprio e devolve a variavel. As
+ * dependencias - modulos que o manifest carrega antes - entram como
+ * parametros com o mesmo nome da global.
+ *
+ * Antes da divisao do coletor.js e do content.js, as funcoes ficavam presas
+ * em IIFEs que nao exportavam nada, e este teste recortava cada uma do texto
+ * do arquivo com um scanner de chaves que pulava comentario, string e regex.
+ * Funcionava, mas testava o recorte junto com a funcao: mudar o formato de
+ * uma declaracao quebrava o teste sem quebrar a extensao.
+ *
+ * @param {string} arquivo nome do arquivo em src/
+ * @param {string} global nome da variavel que o arquivo define
+ * @param {Object} [dependencias] { NomeDaGlobal: valor }
+ * @returns {Object}
  */
-function fimDoBloco(fonte, abre) {
-  let profundidade = 0;
-  let anterior = "";  // ultimo caractere significativo (fora de espaco)
+function carregarModulo(arquivo, global, dependencias) {
+  const codigo = fs.readFileSync(path.join(__dirname, "..", "src", arquivo), "utf8");
+  const nomes = Object.keys(dependencias || {});
+  const valores = nomes.map(function (nome) { return dependencias[nome]; });
 
-  for (let j = abre; j < fonte.length; j++) {
-    const c = fonte[j];
-    const seguinte = fonte[j + 1];
-
-    // Comentario de linha.
-    if (c === "/" && seguinte === "/") {
-      j = fonte.indexOf("\n", j);
-      if (j === -1) return -1;
-      continue;
-    }
-
-    // Comentario de bloco.
-    if (c === "/" && seguinte === "*") {
-      j = fonte.indexOf("*/", j + 2);
-      if (j === -1) return -1;
-      j++;
-      continue;
-    }
-
-    // String simples, dupla ou template (sem interpolacao com chaves).
-    if (c === "\"" || c === "'" || c === "`") {
-      j++;
-      while (j < fonte.length && fonte[j] !== c) {
-        if (fonte[j] === "\\") j++;
-        j++;
-      }
-      anterior = c;
-      continue;
-    }
-
-    // Regex literal: uma "/" onde comeca uma expressao - depois de "(", "=",
-    // "||", "return"... Depois de nome ou de ")" ela e divisao.
-    const podeSerRegex = (anterior !== "" && "(,=:[!&|?{};".indexOf(anterior) !== -1) ||
-      /\breturn\s*$/.test(fonte.slice(Math.max(0, j - 10), j));
-
-    if (c === "/" && podeSerRegex) {
-      let classe = false;
-      j++;
-      while (j < fonte.length) {
-        if (fonte[j] === "\\") {
-          j += 2;
-          continue;
-        }
-        if (fonte[j] === "[") classe = true;
-        else if (fonte[j] === "]") classe = false;
-        else if (fonte[j] === "/" && !classe) break;
-        j++;
-      }
-      anterior = "/";
-      continue;
-    }
-
-    if (c === "{") {
-      profundidade++;
-    } else if (c === "}") {
-      profundidade--;
-      if (profundidade === 0) return j;
-    }
-
-    if (!/\s/.test(c)) anterior = c;
-  }
-
-  return -1;
+  return new Function(nomes.join(","), codigo + "\nreturn " + global + ";")
+    .apply(null, valores);
 }
 
-/**
- * Recorta uma funcao inteira ("function nome(...) { ... }") do texto-fonte.
- * Procura "function nome(" - com o parentese - para "calcular" nao casar
- * com uma "calcularOutraCoisa" que venha antes.
- */
-function extrairFuncao(fonte, nome) {
-  const achado = new RegExp("function " + nome + "\\s*\\(").exec(fonte);
-  if (!achado) {
-    throw new Error("funcao nao encontrada: " + nome);
-  }
-
-  const fim = fimDoBloco(fonte, fonte.indexOf("{", achado.index));
-  if (fim === -1) throw new Error("funcao nao fechada: " + nome);
-
-  return fonte.slice(achado.index, fim + 1);
-}
-
-/**
- * Recorta uma constante "const NOME = { ... };".
- */
-function extrairConstObj(fonte, nome) {
-  const inicio = fonte.indexOf("const " + nome + " = {");
-  if (inicio === -1) {
-    throw new Error("constante nao encontrada: " + nome);
-  }
-
-  const fim = fimDoBloco(fonte, fonte.indexOf("{", inicio));
-  if (fim === -1) throw new Error("constante nao fechada: " + nome);
-
-  return fonte.slice(inicio, fim + 1);
-}
-
-/**
- * Recorta a constante PADRAO_CODIGO, que e uma regex de linha unica
- * terminada em ponto-e-virgula.
- */
-function extrairConstRegex(fonte, nome) {
-  const inicio = fonte.indexOf("const " + nome + " = ");
-  if (inicio === -1) {
-    throw new Error("constante nao encontrada: " + nome);
-  }
-
-  const fim = fonte.indexOf(";", inicio);
-  if (fim === -1) throw new Error("constante sem ';': " + nome);
-
-  return fonte.slice(inicio, fim + 1);
-}
-
-/**
- * Recorta uma constante de valor unico ("const NOME = 12;"), de linha unica
- * terminada em ponto-e-virgula.
- */
-function extrairConstValor(fonte, nome) {
-  const inicio = fonte.indexOf("const " + nome + " = ");
-  if (inicio === -1) {
-    throw new Error("constante nao encontrada: " + nome);
-  }
-
-  const fim = fonte.indexOf(";", inicio);
-  if (fim === -1) throw new Error("constante sem ';': " + nome);
-
-  return fonte.slice(inicio, fim + 1);
-}
-
-// As funcoes de parsing formam um bloco autocontido: nenhuma referencia
-// algo de fora. Por isso podemos evalua-las como um arquivo proprio.
-const blocoFuncoes = [
-  "paraInteiro",
-  "numeroAntesDe",
-  "lerRotulo",
-  "pecasDoTexto",
-  "pecasColadas",
-  "motivoDoNumero",
-  "temLetra",
-  "ehData",
-  "seguidoDeUnidade",
-  "ehPaginaDeCompra",
-  "aceitarNoDeTextoTecnico",
-  "paginaMencionaVisita",
-  "codigosDentroDe",
-  "contextoDoAnuncio",
-  "valorDoRotulo",
-  "trechoDaLeitura",
-  "anotarImplausiveis",
-  "varrerPagina",
-  "caminhoMascarado",
-  "contextoDoTexto",
-  "resumirRecusas",
-  "ehTextoDePeriodo",
-  "estadoDoControle",
-  "coletarTextosDePeriodo"
-].map(function (nome) { return extrairFuncao(fonte, nome); }).join("\n");
-
-// O calculo e a escolha do registro do painel moram no content.js - tambem
-// funcoes puras.
-const blocoFuncaoContent = [
-  extrairConstRegex(fonteContent, "PADRAO_CODIGO"),
-  extrairFuncao(fonteContent, "calcular"),
-  extrairFuncao(fonteContent, "somenteComOrigem"),
-  extrairFuncao(fonteContent, "escolherRegistro"),
-  extrairFuncao(fonteContent, "codigosDaPagina"),
-  extrairFuncao(fonteContent, "precoDoJsonLd"),
-  extrairFuncao(fonteContent, "diasDesde"),
-  extrairFuncao(fonteContent, "formatarPercentual")
-].join("\n");
-
-const blocoConstantes = [
-  extrairConstObj(fonte, "ROTULOS"),
-  extrairConstRegex(fonte, "PADRAO_CODIGO"),
-  extrairConstValor(fonte, "MAX_NIVEIS"),
-  extrairConstValor(fonte, "LIMITE_TEXTO_POR_NIVEL")
-].join("\n");
-
-// Em strict mode o eval tem escopo proprio: function e const nao vazam para
-// fora. Entao nao contamos com isso - pedimos ao final do codigo avaliado um
-// objeto com as referencias, que e atribuido a uma variavel do escopo deste
-// teste.
-let exportados;
-const codigoAvaliado = blocoConstantes + "\n" + blocoFuncoes + "\n" +
-  "exportados = {" +
-  "  paraInteiro: paraInteiro," +
-  "  numeroAntesDe: numeroAntesDe," +
-  "  lerRotulo: lerRotulo," +
-  "  pecasDoTexto: pecasDoTexto," +
-  "  motivoDoNumero: motivoDoNumero," +
-  "  resumirRecusas: resumirRecusas," +
-  "  ehTextoDePeriodo: ehTextoDePeriodo," +
-  "  coletarTextosDePeriodo: coletarTextosDePeriodo," +
-  "  temLetra: temLetra," +
-  "  ehData: ehData," +
-  "  seguidoDeUnidade: seguidoDeUnidade," +
-  "  caminhoMascarado: caminhoMascarado," +
-  "  LIMITE_TEXTO_POR_NIVEL: LIMITE_TEXTO_POR_NIVEL," +
-  "  ehPaginaDeCompra: ehPaginaDeCompra," +
-  "  aceitarNoDeTextoTecnico: aceitarNoDeTextoTecnico," +
-  "  paginaMencionaVisita: paginaMencionaVisita," +
-  "  codigosDentroDe: codigosDentroDe," +
-  "  contextoDoAnuncio: contextoDoAnuncio," +
-  "  valorDoRotulo: valorDoRotulo," +
-  "  anotarImplausiveis: anotarImplausiveis," +
-  "  varrerPagina: varrerPagina," +
-  "  ROTULOS: ROTULOS," +
-  "  PADRAO_CODIGO: PADRAO_CODIGO," +
-  "  MAX_NIVEIS: MAX_NIVEIS" +
-  "};";
-
-eval(codigoAvaliado);
-
-// O content.js tambem e IIFE; mesmo truque para as funcoes dele.
-let exportadosContent;
-eval(blocoFuncaoContent + "\n" +
-  "exportadosContent = {" +
-  "  calcular: calcular," +
-  "  somenteComOrigem: somenteComOrigem," +
-  "  escolherRegistro: escolherRegistro," +
-  "  codigosDaPagina: codigosDaPagina," +
-  "  precoDoJsonLd: precoDoJsonLd," +
-  "  diasDesde: diasDesde," +
-  "  formatarPercentual: formatarPercentual" +
-  "};");
+const MLMetricsLeitura = carregarModulo("leitura.js", "MLMetricsLeitura");
+const MLMetricsDiagnostico = carregarModulo("diagnostico.js", "MLMetricsDiagnostico", {
+  MLMetricsLeitura: MLMetricsLeitura
+});
+const MLMetricsCalculo = carregarModulo("calculo.js", "MLMetricsCalculo");
+const MLMetricsGravacao = carregarModulo("gravacao.js", "MLMetricsGravacao");
 
 const {
   numeroAntesDe,
@@ -296,22 +92,17 @@ const {
   LIMITE_TEXTO_POR_NIVEL,
   valorDoRotulo,
   lerRotulo,
-  resumirRecusas,
-  ehTextoDePeriodo,
-  coletarTextosDePeriodo,
   ehPaginaDeCompra,
   paginaMencionaVisita,
   varrerPagina,
   ROTULOS,
   PADRAO_CODIGO
-} = exportados;
-
-// A regra de gravacao (gravacao.js) nao e IIFE escondida: define a variavel
-// MLMetricsGravacao. new Function roda o arquivo num escopo proprio e devolve
-// essa variavel.
-const MLMetricsGravacao = new Function(
-  fs.readFileSync(CAMINHO_GRAVACAO, "utf8") + "\nreturn MLMetricsGravacao;"
-)();
+} = MLMetricsLeitura;
+const {
+  resumirRecusas,
+  ehTextoDePeriodo,
+  coletarTextosDePeriodo
+} = MLMetricsDiagnostico;
 const { mudou, faltaOrigem, mesclarOrigem } = MLMetricsGravacao;
 const {
   calcular,
@@ -321,7 +112,8 @@ const {
   precoDoJsonLd,
   diasDesde,
   formatarPercentual
-} = exportadosContent;
+} = MLMetricsCalculo;
+
 
 // ----------------------------------------------------------------------------
 // Harness de teste
@@ -1152,6 +944,44 @@ const rUrlInvalida = varrerPagina(documentoDa(corpoVendedor), "nao-e-uma-url");
 testar("url invalida: a leitura continua", 359, rUrlInvalida["MLB3456789012"].visitas);
 testar("url invalida: o rastro diz que a tela e desconhecida", "(url invalida)",
   rUrlInvalida["MLB3456789012"].origem.visitas.tela);
+
+console.log("");
+console.log("=== manifest - cada arquivo depois de quem ele usa ===");
+// Os arquivos de src/ conversam por variaveis globais: o leitura.js define
+// MLMetricsLeitura, e o coletor.js usa. Se o manifest carregar um arquivo
+// ANTES do que ele usa, a global ainda nao existe, o script morre no
+// carregamento e nada funciona naquela aba - sem nem o registrarErro para
+// contar, porque ele tambem nao carregou. O teste no navegador nao pega isso:
+// ele carrega a propria lista de arquivos, nao a do manifest.
+const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
+const ordemDoManifest = manifest.content_scripts[0].js;
+const globaisDefinidas = [];
+
+ordemDoManifest.forEach(function (arquivo) {
+  // Sem as linhas de comentario: cabecalho que cita "MLMetricsLeitura." nao
+  // e uso de verdade.
+  const codigo = fs.readFileSync(path.join(__dirname, "..", arquivo), "utf8")
+    .split("\n")
+    .filter(function (linha) { return !/^\s*(\/\*\*|\*|\/\/)/.test(linha); })
+    .join("\n");
+  const definida = (codigo.match(/^var (MLMetrics\w+) =/m) || [])[1];
+  const usadas = (codigo.match(/MLMetrics\w+(?=\.)/g) || []).filter(function (global, i, todas) {
+    return global !== definida && todas.indexOf(global) === i;
+  });
+
+  usadas.forEach(function (global) {
+    testar("manifest: " + arquivo + " vem depois de quem define " + global, true,
+      globaisDefinidas.indexOf(global) !== -1);
+  });
+
+  if (definida) globaisDefinidas.push(definida);
+});
+
+// Modulo fora do manifest nao carrega na pagina: o arquivo existe, os testes
+// passam, e a extensao de verdade quebra.
+testar("manifest: todo modulo de src/ esta na lista", "", [
+  "src/gravacao.js", "src/leitura.js", "src/diagnostico.js", "src/calculo.js"
+].filter(function (arquivo) { return ordemDoManifest.indexOf(arquivo) === -1; }).join(", "));
 
 console.log("");
 console.log("=== gravacao.js - a regra de mesclar no cache ===");
