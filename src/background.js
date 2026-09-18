@@ -76,10 +76,11 @@ function gravarNaFila(novos, automatica) {
         }
 
         const cache = guardado[CHAVE_CACHE] || {};
+        const agora = Date.now();
         let resultado;
 
         try {
-          resultado = MLMetricsGravacao.mesclar(cache, novos, Date.now(), automatica);
+          resultado = MLMetricsGravacao.mesclar(cache, novos, agora, automatica);
         } catch (e) {
           resolve({ ok: false });  // mensagem malformada: nao grava nada
           return;
@@ -98,7 +99,15 @@ function gravarNaFila(novos, automatica) {
             resolve({ ok: false, motivo: chrome.runtime.lastError.message });
             return;
           }
-          resolve({ ok: true, mudancas: resultado.mudancas.length });
+
+          // O historico vem DEPOIS do cache, numa gravacao separada, mas
+          // dentro da mesma tarefa da fila - duas abas nao se atropelam nele
+          // tambem. Se ele falhar, o cache ja esta gravado: o historico e um
+          // extra, nunca o motivo de perder uma leitura.
+          const resposta = { ok: true, mudancas: resultado.mudancas.length };
+          gravarHistorico(novos, agora, automatica, function () {
+            resolve(resposta);
+          });
         });
       });
     });
@@ -108,6 +117,64 @@ function gravarNaFila(novos, automatica) {
   filaDeGravacao = tarefa.catch(function () {});
 
   return tarefa;
+}
+
+/**
+ * Anota a leitura de cada anuncio no historico diario dele (ver registrarDia
+ * no gravacao.js). So grava as chaves que mudaram.
+ *
+ * So e chamada quando o cache mudou ou foi renovado: o mesmo numero relido
+ * em menos de 2 minutos nao chega aqui, e ele ja esta no historico do dia.
+ * (Perto da meia-noite, o dia novo so ganha registro na leitura seguinte, 2
+ * minutos depois - nao compensa uma regra so para isso.)
+ *
+ * @param {Object} novos o que a varredura leu, por codigo de anuncio
+ * @param {number} agora
+ * @param {boolean} automatica
+ * @param {Function} pronto chamada sempre, com ou sem erro - a fila depende
+ *                          dela para andar
+ */
+function gravarHistorico(novos, agora, automatica, pronto) {
+  const codigos = Object.keys(novos);
+  const chaves = codigos.map(MLMetricsGravacao.chaveDoHistorico);
+
+  chrome.storage.local.get(chaves, function (guardado) {
+    if (chrome.runtime.lastError) {
+      pronto();
+      return;
+    }
+
+    const alterados = {};
+
+    try {
+      codigos.forEach(function (codigo) {
+        const chave = MLMetricsGravacao.chaveDoHistorico(codigo);
+        const historico = guardado[chave] || {};
+
+        if (MLMetricsGravacao.registrarDia(historico, novos[codigo], agora, automatica)) {
+          alterados[chave] = historico;
+        }
+      });
+    } catch (e) {
+      // Leitura em formato inesperado: sem historico desta vez, mas a fila
+      // NAO pode travar - pronto() tem que ser chamada de qualquer jeito.
+      pronto();
+      return;
+    }
+
+    if (Object.keys(alterados).length === 0) {
+      pronto();
+      return;
+    }
+
+    chrome.storage.local.set(alterados, function () {
+      if (chrome.runtime.lastError) {
+        console.warn("[ML METRICS] nao consegui gravar o historico: " +
+          chrome.runtime.lastError.message);
+      }
+      pronto();
+    });
+  });
 }
 
 /**

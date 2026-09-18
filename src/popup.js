@@ -198,12 +198,14 @@
   }
 
   /**
-   * Endereco de origem sem o que pode identificar alguem.
+   * Endereco de origem sem o que pode identificar alguem: o host e a FORMA da
+   * rota, pela mesma regra do diagnostico - o caminhoMascarado do leitura.js,
+   * que o popup.html carrega antes deste arquivo. Digitos viram "#" e titulo
+   * de produto (slug com muitos hifens) vira "(titulo)". A query nunca entra.
    *
-   * Mesma regra do caminhoMascarado do coletor.js - duplicada porque o popup
-   * nao carrega os scripts de conteudo. Mantem o host e a FORMA da rota;
-   * digitos viram "#" e titulo de produto (slug com muitos hifens) vira
-   * "(titulo)".
+   * Ate o lote 26 o popup tinha uma COPIA dessa regra, porque nao carregava os
+   * scripts das abas. Copia de regra de privacidade e o pior tipo de copia:
+   * corrigir uma e esquecer a outra deixa dado pessoal escapar por um lado so.
    *
    * As origens entram no relatorio para mostrar quais telas de vendedor a
    * extensao reconheceu, e a forma da rota basta para isso. O caminho cru
@@ -216,19 +218,50 @@
   function enderecoMascarado(url) {
     try {
       const endereco = new URL(url);
-      const caminho = endereco.pathname.split("/").map(function (trecho) {
-        if (trecho.split("-").length > 3) return "(titulo)";
-        return trecho.replace(/\d+/g, "#");
-      }).join("/");
-      return endereco.hostname + caminho;
+      return endereco.hostname + MLMetricsLeitura.caminhoMascarado(endereco.pathname);
     } catch (e) {
       return "(endereco invalido)";
     }
   }
 
   /**
-   * Pede a aba ativa o diagnostico da tela aberta nela (coletor.js,
-   * diagnosticarTelaAtual).
+   * Resumo do historico diario para o relatorio (ver registrarDia no
+   * gravacao.js): quantos anuncios tem historico, quantos dias ao todo e o
+   * primeiro e o ultimo dia.
+   *
+   * So contagens e datas, nunca os numeros de cada dia. Meses de historico
+   * nao cabem numa conversa e nao ajudam a diagnosticar nada; o que interessa
+   * no relatorio e saber se a gravacao esta acontecendo.
+   *
+   * @param {Object} tudo o storage inteiro da extensao
+   * @returns {Object}
+   */
+  function resumirHistorico(tudo) {
+    const dias = [];
+    let anuncios = 0;
+
+    Object.keys(tudo).forEach(function (chave) {
+      if (chave.indexOf(MLMetricsGravacao.PREFIXO_HISTORICO) !== 0) return;
+
+      anuncios++;
+      Object.keys(tudo[chave] || {}).forEach(function (dia) {
+        dias.push(dia);
+      });
+    });
+
+    dias.sort();
+
+    return {
+      anuncios: anuncios,
+      registros: dias.length,
+      primeiroDia: dias[0] || null,
+      ultimoDia: dias[dias.length - 1] || null
+    };
+  }
+
+  /**
+   * Pede a aba ativa o diagnostico da tela aberta nela (o coletor.js responde
+   * com diagnosticarTela, do diagnostico.js).
    *
    * O diagnostico guardado no storage e da ultima pagina que falhou, em
    * qualquer aba e ha qualquer tempo - nao necessariamente da tela que a
@@ -321,8 +354,10 @@
    */
   function montarRelatorio(telaAtual) {
     try {
+      // null = o storage inteiro: o historico e uma chave por anuncio, e so
+      // lendo tudo da para resumi-lo (ver resumirHistorico).
       chrome.storage.local.get(
-        [CHAVE_CACHE, CHAVE_DIAGNOSTICO, CHAVE_ORIGENS, CHAVE_ERRO],
+        null,
         function (guardado) {
           if (chrome.runtime.lastError) return;  // contexto invalidado
 
@@ -343,6 +378,8 @@
             // certa.
             origens: (guardado[CHAVE_ORIGENS] || []).map(enderecoMascarado),
             capturado: guardado[CHAVE_CACHE] || {},
+            // Se o historico diario esta sendo gravado - so o resumo.
+            historico: resumirHistorico(guardado),
             // O ultimo diagnostico gravado sozinho, de qualquer aba. Pode ser
             // de outra tela - por isso a telaAtual vem antes.
             ultimoDiagnosticoGuardado: guardado[CHAVE_DIAGNOSTICO] || null

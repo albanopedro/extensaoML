@@ -503,7 +503,7 @@ var MLMetricsLeitura = (function () {
    * por ambiguidade (#38). Por isso separamos pelo ENDERECO do link: havendo
    * exatamente UM item, os links de catalogo/user product em volta sao do
    * mesmo anuncio, e o codigo e o do item - que e tambem o que o painel procura
-   * primeiro (ver codigosDaPagina no content.js). Dois itens diferentes
+   * primeiro (ver codigosDaPagina no calculo.js). Dois itens diferentes
    * continuam sendo ambiguidade.
    *
    * @param {Element} elemento

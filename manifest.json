@@ -2,7 +2,7 @@
   "manifest_version": 3,
 
   "name": "ML Metrics",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "Mostra metricas de desempenho em anuncios do Mercado Livre.",
 
   "icons": {
@@ -12,7 +12,7 @@
     "128": "icons/icon128.png"
   },
 
-  "permissions": ["storage", "clipboardWrite"],
+  "permissions": ["storage", "unlimitedStorage", "clipboardWrite"],
 
   "host_permissions": [
     "https://*.mercadolivre.com.br/*"

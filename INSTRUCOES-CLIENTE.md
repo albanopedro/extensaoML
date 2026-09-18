@@ -21,6 +21,13 @@ que você abre. Não consulta nenhuma página sozinha e não abre abas nem
 janelas. Para os números se atualizarem, basta passar de vez em quando por
 "Minhas publicações".
 
+Desde a versão 0.2.0, cada vez que ela lê seus anúncios também guarda uma
+anotação por dia de cada um (visitas e vendas daquele dia), **só no seu
+navegador**. É isso que vai permitir mostrar, mais para frente, quanto cada
+anúncio vende por mês — por enquanto nada disso aparece na tela. Quanto mais
+vezes por semana você passar por "Minhas publicações", mais completo fica. O
+botão "Limpar dados guardados" apaga essas anotações junto com o resto.
+
 ## Instalando
 
 1. Descompacte a pasta que eu enviei e coloque onde ela vá ficar.

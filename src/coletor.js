@@ -171,7 +171,8 @@
             }
 
             const cache = guardado[CHAVE_CACHE] || {};
-            const resultado = MLMetricsGravacao.mesclar(cache, novos, Date.now(), emSegundoPlano);
+            const agora = Date.now();
+            const resultado = MLMetricsGravacao.mesclar(cache, novos, agora, emSegundoPlano);
 
             if (resultado.mudancas.length === 0 && resultado.renovados.length === 0) {
               resolve();  // nada o que persistir
@@ -186,10 +187,16 @@
                   "[ML METRICS] nao consegui gravar o cache: " +
                   chrome.runtime.lastError.message
                 );
-              } else {
-                pronto(resultado.mudancas.length);
+                resolve();
+                return;
               }
-              resolve();
+
+              pronto(resultado.mudancas.length);
+
+              // Historico diario, depois do cache e dentro da mesma fila -
+              // mesma regra do service worker (gravarHistorico no
+              // background.js).
+              gravarHistoricoNestaAba(novos, agora, emSegundoPlano, resolve);
             });
           });
         } catch (e) {
@@ -199,6 +206,60 @@
     }).catch(function () {
       // A fila nunca para: erro de uma gravacao deixa a proxima tentar.
     });
+  }
+
+  /**
+   * Plano B do historico diario: o mesmo que o gravarHistorico do
+   * background.js faz, daqui da aba (ver registrarDia no gravacao.js).
+   *
+   * @param {Object} novos
+   * @param {number} agora
+   * @param {boolean} emSegundoPlano
+   * @param {Function} pronto chamada sempre - a fila da aba depende dela
+   */
+  function gravarHistoricoNestaAba(novos, agora, emSegundoPlano, pronto) {
+    const codigos = Object.keys(novos);
+    const chaves = codigos.map(MLMetricsGravacao.chaveDoHistorico);
+
+    try {
+      chrome.storage.local.get(chaves, function (guardado) {
+        if (chrome.runtime.lastError) {
+          pronto();
+          return;
+        }
+
+        const alterados = {};
+
+        try {
+          codigos.forEach(function (codigo) {
+            const chave = MLMetricsGravacao.chaveDoHistorico(codigo);
+            const historico = guardado[chave] || {};
+
+            if (MLMetricsGravacao.registrarDia(historico, novos[codigo], agora, emSegundoPlano)) {
+              alterados[chave] = historico;
+            }
+          });
+        } catch (e) {
+          pronto();  // formato inesperado: sem historico desta vez
+          return;
+        }
+
+        if (Object.keys(alterados).length === 0) {
+          pronto();
+          return;
+        }
+
+        chrome.storage.local.set(alterados, function () {
+          if (chrome.runtime.lastError) {
+            console.warn("[ML METRICS] nao consegui gravar o historico: " +
+              chrome.runtime.lastError.message);
+          }
+          pronto();
+        });
+      });
+    } catch (e) {
+      pronto();  // contexto invalidado
+    }
   }
 
   /**

@@ -180,6 +180,38 @@
     });
   }
 
+  /**
+   * Abre o popup de verdade (src/popup.html) com o chrome falso JA instalado
+   * quando os scripts dele rodam.
+   *
+   * O abrirFixture instala o chrome depois do load - tarde demais para o
+   * popup, que desenha a lista assim que carrega. Por isso o HTML e buscado e
+   * aberto como srcdoc, com uma linha na frente que pega o chrome falso do
+   * teste e um <base> para os scripts continuarem sendo os arquivos de src/.
+   */
+  async function abrirPopup(armazem) {
+    const resposta = await fetch("/src/popup.html?t=" + Date.now());
+    const html = await resposta.text();
+    const falso = chromeFalso(armazem);
+
+    window.chromeDoPopup = falso;
+
+    const preparado = html.replace("<head>",
+      "<head><base href=\"" + location.origin + "/src/\">" +
+      "<script>Object.defineProperty(window, \"chrome\", " +
+      "{ value: parent.chromeDoPopup, writable: true, configurable: true });<\/script>");
+
+    return new Promise(function (resolve) {
+      const quadro = document.createElement("iframe");
+
+      quadro.onload = function () {
+        resolve({ documento: quadro.contentDocument, falso: falso });
+      };
+      quadro.srcdoc = preparado;
+      document.getElementById("quadros").appendChild(quadro);
+    });
+  }
+
   function valorDaLinha(documento, rotulo) {
     const linhas = documento.querySelectorAll("#mlmetrics-painel .mlmetrics-linha");
 
@@ -291,6 +323,16 @@
     testar("#38: card com item + catalogo grava no item (visitas)", 42, campo(cache, "MLB9999999999", "visitas"));
     testar("#38: card com item + catalogo grava no item (vendas)", 3, campo(cache, "MLB9999999999", "vendas"));
     testar("#38: nada gravado no codigo do catalogo", "sem registro", campo(cache, "MLB12345678", "visitas"));
+
+    // Historico diario (lote 26): a mesma leitura entra no dia de hoje, na
+    // chave do anuncio, com o rastro. O dia vem da propria regra do
+    // gravacao.js carregado na fixture.
+    const hoje = tela.documento.defaultView.MLMetricsGravacao.diaDe(Date.now());
+    const diaDoHistorico = (armazem1.mlmetrics_historico_MLB1111111111 || {})[hoje] || {};
+    const rastroDoDia = (diaDoHistorico.origem || {}).visitas || {};
+
+    testar("historico: a leitura da tela entra no dia de hoje", 359, diaDoHistorico.visitas);
+    testar("historico: com o rastro da leitura", true, /359 visitas/.test(rastroDoDia.trecho || ""));
 
     let diagnostico = null;
     tela.falso.ouvinteDeMensagem({ tipo: "diagnosticar" }, { id: "teste-local" }, function (resposta) {
@@ -443,6 +485,43 @@
 
     testar("plano B: passado o tempo limite, a aba grava sozinha", 359,
       campo(armazemMudo.mlmetrics_dados || {}, "MLB1111111111", "visitas"));
+
+    // --- 8. Popup: regra do leitura.js e resumo do historico (lote 26) ------
+    const armazemPopup = {
+      mlmetrics_dados: { MLB1111111111: registroComOrigem(359, 50) },
+      mlmetrics_origens: ["https://www.mercadolivre.com.br/anuncios/lista/12345678?filtro=ativos"],
+      mlmetrics_historico_MLB1111111111: {
+        "2026-09-17": { visitas: 351, origem: { visitas: { trecho: "«351 visitas» marcador-do-historico", tela: "/anuncios/lista", em: 1 } } },
+        "2026-09-18": { visitas: 359, origem: { visitas: { trecho: "«359 visitas» marcador-do-historico", tela: "/anuncios/lista", em: 2 } } }
+      }
+    };
+    const popup = await abrirPopup(armazemPopup);
+    await esperar(300);
+
+    testar("popup: abre com leitura.js e gravacao.js e lista o capturado", true,
+      /1 anúncio/.test(popup.documento.getElementById("resumo").textContent));
+
+    popup.documento.getElementById("copiar").click();
+    await esperar(500);
+
+    const textoDoRelatorio = popup.documento.getElementById("diagnostico").value;
+    let relatorio = null;
+    try {
+      relatorio = JSON.parse(textoDoRelatorio);
+    } catch (e) {
+      // relatorio fica null e os testes abaixo mostram a falha
+    }
+
+    testar("popup: relatorio montado", true, Boolean(relatorio));
+    testar("popup: origem mascarada pela regra do leitura.js", "www.mercadolivre.com.br/anuncios/lista/#",
+      relatorio ? relatorio.origens[0] : null);
+    testar("popup: resumo do historico (anuncios/registros/primeiro/ultimo)", "1/2/2026-09-17/2026-09-18",
+      relatorio ? [
+        relatorio.historico.anuncios, relatorio.historico.registros,
+        relatorio.historico.primeiroDia, relatorio.historico.ultimoDia
+      ].join("/") : null);
+    testar("popup: o relatorio nao leva os numeros de cada dia", -1,
+      textoDoRelatorio.indexOf("marcador-do-historico"));
   }
 
   function mostrarResumo() {

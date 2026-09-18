@@ -955,27 +955,55 @@ console.log("=== manifest - cada arquivo depois de quem ele usa ===");
 // ele carrega a propria lista de arquivos, nao a do manifest.
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
 const ordemDoManifest = manifest.content_scripts[0].js;
-const globaisDefinidas = [];
 
-ordemDoManifest.forEach(function (arquivo) {
-  // Sem as linhas de comentario: cabecalho que cita "MLMetricsLeitura." nao
-  // e uso de verdade.
-  const codigo = fs.readFileSync(path.join(__dirname, "..", arquivo), "utf8")
-    .split("\n")
-    .filter(function (linha) { return !/^\s*(\/\*\*|\*|\/\/)/.test(linha); })
-    .join("\n");
-  const definida = (codigo.match(/^var (MLMetrics\w+) =/m) || [])[1];
-  const usadas = (codigo.match(/MLMetrics\w+(?=\.)/g) || []).filter(function (global, i, todas) {
-    return global !== definida && todas.indexOf(global) === i;
+/**
+ * Confere uma lista de arquivos carregados em sequencia: cada global
+ * MLMetrics... que um arquivo usa precisa ter sido definida por um arquivo
+ * ANTERIOR da lista.
+ *
+ * @param {string} onde rotulo do teste ("manifest", "popup.html")
+ * @param {string[]} arquivos caminhos relativos a raiz do projeto, na ordem
+ */
+function conferirOrdem(onde, arquivos) {
+  const globaisDefinidas = [];
+
+  arquivos.forEach(function (arquivo) {
+    // Sem as linhas de comentario: cabecalho que cita "MLMetricsLeitura."
+    // nao e uso de verdade.
+    const codigo = fs.readFileSync(path.join(__dirname, "..", arquivo), "utf8")
+      .split("\n")
+      .filter(function (linha) { return !/^\s*(\/\*\*|\*|\/\/)/.test(linha); })
+      .join("\n");
+    const definida = (codigo.match(/^var (MLMetrics\w+) =/m) || [])[1];
+    const usadas = (codigo.match(/MLMetrics\w+(?=\.)/g) || []).filter(function (global, i, todas) {
+      return global !== definida && todas.indexOf(global) === i;
+    });
+
+    usadas.forEach(function (global) {
+      testar(onde + ": " + arquivo + " vem depois de quem define " + global, true,
+        globaisDefinidas.indexOf(global) !== -1);
+    });
+
+    if (definida) globaisDefinidas.push(definida);
   });
+}
 
-  usadas.forEach(function (global) {
-    testar("manifest: " + arquivo + " vem depois de quem define " + global, true,
-      globaisDefinidas.indexOf(global) !== -1);
-  });
+conferirOrdem("manifest", ordemDoManifest);
 
-  if (definida) globaisDefinidas.push(definida);
-});
+// O popup tem a propria lista, nas tags <script> do popup.html (lote 26): ele
+// passou a usar leitura.js e gravacao.js em vez de copias das regras.
+const scriptsDoPopup = (fs.readFileSync(path.join(__dirname, "..", "src", "popup.html"), "utf8")
+  .match(/<script src="[^"]+"><\/script>/g) || [])
+  .map(function (tag) { return "src/" + tag.match(/src="([^"]+)"/)[1]; });
+conferirOrdem("popup.html", scriptsDoPopup);
+testar("popup.html: carrega o popup.js por ultimo", "src/popup.js",
+  scriptsDoPopup[scriptsDoPopup.length - 1]);
+
+// Sem "unlimitedStorage" a cota e de 10 MB, e o historico diario de centenas
+// de anuncios a enche em meses. Cota cheia nao falha so o historico: o CACHE
+// tambem deixa de gravar, e o painel para de receber numero novo.
+testar("manifest: pede unlimitedStorage (historico nao disputa cota com o cache)", true,
+  (manifest.permissions || []).indexOf("unlimitedStorage") !== -1);
 
 // Modulo fora do manifest nao carrega na pagina: o arquivo existe, os testes
 // passam, e a extensao de verdade quebra.
@@ -1011,6 +1039,69 @@ const cacheAntigo = { MLB2: { visitas: 10, capturadoEm: T0 } };
 const g6 = MLMetricsGravacao.mesclar(cacheAntigo, { MLB2: { visitas: 10, origem: { visitas: origemDe("f") } } }, T0 + 1000, false);
 testar("mesclar: registro antigo sem rastro renova na hora", "MLB2", g6.renovados.join(","));
 testar("mesclar: e ganha o rastro", "f", cacheAntigo.MLB2.origem.visitas.trecho);
+
+console.log("");
+console.log("=== gravacao.js - historico diario (lote 26) ===");
+// Datas locais montadas pelo proprio Date: o teste vale em qualquer fuso.
+const DIA_18 = new Date(2026, 8, 18, 10, 0).getTime();
+const DIA_18_NOITE = new Date(2026, 8, 18, 23, 50).getTime();
+const DIA_19 = new Date(2026, 8, 19, 9, 0).getTime();
+const leituraDe = function (visitas, vendas, marca) {
+  const novo = { origem: {} };
+  if (visitas !== undefined) {
+    novo.visitas = visitas;
+    novo.origem.visitas = { trecho: "«" + visitas + " visitas» " + marca, tela: "/anuncios/lista" };
+  }
+  if (vendas !== undefined) {
+    novo.vendas = vendas;
+    novo.origem.vendas = { trecho: "«" + vendas + " vendas» " + marca, tela: "/anuncios/lista" };
+  }
+  return novo;
+};
+
+testar("historico: chave por anuncio, com o prefixo que o Limpar apaga",
+  "mlmetrics_historico_MLB1", MLMetricsGravacao.chaveDoHistorico("MLB1"));
+testar("historico: dia local com zeros", "2026-01-05",
+  MLMetricsGravacao.diaDe(new Date(2026, 0, 5, 0, 1).getTime()));
+testar("historico: 23h50 ainda e o mesmo dia", "2026-09-18", MLMetricsGravacao.diaDe(DIA_18_NOITE));
+
+const hist = {};
+testar("historico: primeira leitura do dia grava", true,
+  MLMetricsGravacao.registrarDia(hist, leituraDe(359, 12, "a"), DIA_18, false));
+testar("historico: um registro no dia, com os dois numeros", "359/12",
+  hist["2026-09-18"].visitas + "/" + hist["2026-09-18"].vendas);
+testar("historico: cada numero leva o rastro de onde veio", "«359 visitas» a",
+  hist["2026-09-18"].origem.visitas.trecho);
+testar("historico: e a hora da leitura", DIA_18, hist["2026-09-18"].origem.visitas.em);
+
+testar("historico: mesmo numero de novo no dia nao muda nada", false,
+  MLMetricsGravacao.registrarDia(hist, leituraDe(359, 12, "b"), DIA_18 + 60 * 60 * 1000, false));
+testar("historico: e o rastro fica o da primeira leitura", "«359 visitas» a",
+  hist["2026-09-18"].origem.visitas.trecho);
+
+MLMetricsGravacao.registrarDia(hist, leituraDe(361, undefined, "c"), DIA_18_NOITE, false);
+testar("historico: numero novo no mesmo dia vence (fechamento do dia)", 361, hist["2026-09-18"].visitas);
+testar("historico: a outra metrica do dia continua", 12, hist["2026-09-18"].vendas);
+
+const semRastro = { visitas: 999 };
+testar("historico: numero sem rastro de origem nao entra", false,
+  MLMetricsGravacao.registrarDia(hist, semRastro, DIA_18_NOITE, false));
+
+MLMetricsGravacao.registrarDia(hist, leituraDe(370, undefined, "d"), DIA_19, false);
+testar("historico: dia seguinte ganha registro proprio", "2026-09-18,2026-09-19",
+  Object.keys(hist).sort().join(","));
+testar("historico: so entra o que foi lido naquele dia (vendas nao e copiada)", undefined,
+  hist["2026-09-19"].vendas);
+
+const histVelho = { "2025-01-01": { visitas: 1, origem: {} } };
+MLMetricsGravacao.registrarDia(histVelho, leituraDe(5, undefined, "e"), DIA_18, false);
+testar("historico: dia com mais de " + MLMetricsGravacao.DIAS_DE_HISTORICO + " dias sai", "2026-09-18",
+  Object.keys(histVelho).join(","));
+
+const histAuto = {};
+MLMetricsGravacao.registrarDia(histAuto, leituraDe(7, undefined, "f"), DIA_18, true);
+testar("historico: marca leitura da busca automatica", true,
+  histAuto["2026-09-18"].origem.visitas.automatica);
 
 // ----------------------------------------------------------------------------
 // Service worker (background.js) - com chrome falso, sem navegador
@@ -1104,6 +1195,18 @@ async function testesDoServiceWorker() {
   const deFora = await chromeSW.enviar({ tipo: "salvar", novos: { MLB9: { visitas: 1 } } }, { id: "outra-extensao" });
   testar("SW: pedido de fora da extensao e recusado", false, deFora.ok);
   testar("SW: e nao grava nada", undefined, (chromeSW.armazem.mlmetrics_dados || {}).MLB9);
+  testar("SW: nem historico", undefined, chromeSW.armazem.mlmetrics_historico_MLB9);
+
+  // As tres gravacoes simultaneas do comeco tambem passaram pelo historico,
+  // dentro da mesma fila: duas abas nao podem apagar o dia uma da outra.
+  const hoje = MLMetricsGravacao.diaDe(Date.now());
+  const histMLB1 = (chromeSW.armazem.mlmetrics_historico_MLB1 || {})[hoje] || {};
+  testar("SW: historico do dia junta visitas e vendas de abas diferentes", "10/3",
+    histMLB1.visitas + "/" + histMLB1.vendas);
+  testar("SW: historico grava o rastro de cada numero", "a",
+    histMLB1.origem ? histMLB1.origem.visitas.trecho : "sem rastro");
+  testar("SW: cada anuncio na propria chave de historico", 20,
+    ((chromeSW.armazem.mlmetrics_historico_MLB2 || {})[hoje] || {}).visitas);
 
   const buscaFora = await chromeSW.enviar({ tipo: "buscar", url: "https://example.com/" }, daExtensao);
   testar("SW: busca fora do dominio do ML e recusada", false, buscaFora.ok);

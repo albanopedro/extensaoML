@@ -9,25 +9,42 @@
 // gravar (#21). Agora a gravacao mora no SERVICE WORKER, que e um so para
 // todas as abas e grava uma leitura de cada vez.
 //
-// Aqui fica so a REGRA, sem chrome.storage. O arquivo e carregado:
+// Aqui fica so a REGRA, sem chrome.storage - a do cache (mesclar) e a do
+// historico diario (registrarDia). O arquivo e carregado:
 //   - no service worker (importScripts), que faz a gravacao de verdade;
 //   - nas abas (manifest), onde serve de plano B quando o service worker nao
-//     responde - melhor gravar com risco de corrida do que perder a leitura.
+//     responde - melhor gravar com risco de corrida do que perder a leitura;
+//   - no popup, que usa o prefixo do historico para resumir o que existe.
 // Por nao tocar em nada do navegador, e testado em Node (teste/test-parsing.js).
 // ============================================================================
 
 var MLMetricsGravacao = (function () {
   "use strict";
 
-  // As metricas que existem no cache. Sao as chaves de ROTULOS no coletor.js,
+  // As metricas que existem no cache. Sao as chaves de ROTULOS no leitura.js,
   // repetidas aqui porque este arquivo tambem roda no service worker, onde o
-  // coletor nao existe.
+  // leitura.js nao e carregado.
   const METRICAS = ["visitas", "vendas"];
 
   // De quanto em quanto tempo o "capturadoEm" de um anuncio ESTAVEL e
   // renovado. Reconfirmar a cada varredura gravaria no storage a cada 600ms
   // sem parar; 2 minutos equilibra frescor com nao pesar em I/O.
   const INTERVALO_RENOVACAO_MS = 2 * 60 * 1000;
+
+  // Historico diario (ver registrarDia): uma chave por anuncio no storage,
+  // "mlmetrics_historico_MLB123". Uma chave so para todos obrigaria a
+  // reescrever meses de historico de todos os anuncios a cada leitura; por
+  // anuncio, grava-se so o que mudou, e quem for exibir le so o anuncio da
+  // tela. O prefixo comeca com "mlmetrics_": o "Limpar dados guardados" do
+  // popup apaga por esse prefixo, entao o historico ja nasce coberto.
+  const PREFIXO_HISTORICO = "mlmetrics_historico_";
+
+  // Quantos dias de historico ficam por anuncio. Um ano e um mes: da para
+  // comparar um mes com o mesmo mes do ano anterior, e o historico nao cresce
+  // sem fim. A cota do storage nao limita: o manifest pede "unlimitedStorage"
+  // - sem ele, o historico de centenas de anuncios encheria os 10 MB e o
+  // CACHE, que e o que o painel usa, deixaria de conseguir gravar.
+  const DIAS_DE_HISTORICO = 400;
 
   /**
    * Diz se os numeros de um anuncio mudaram em relacao ao que ja tinhamos.
@@ -176,10 +193,106 @@ var MLMetricsGravacao = (function () {
     return { mudancas: mudancas, renovados: renovados };
   }
 
+  /**
+   * Chave do historico de um anuncio no storage.
+   *
+   * @param {string} codigo ex: "MLB3456789012"
+   * @returns {string}
+   */
+  function chaveDoHistorico(codigo) {
+    return PREFIXO_HISTORICO + codigo;
+  }
+
+  /**
+   * Dia LOCAL de um instante, no formato "AAAA-MM-DD".
+   *
+   * Local, e nao UTC: o dia que importa e o da vendedora. Em UTC, uma leitura
+   * feita as 22h de Brasilia ja cairia no dia seguinte. E o formato
+   * ano-mes-dia com zeros ordena como texto, o que a poda usa para comparar.
+   *
+   * @param {number} timestamp
+   * @returns {string}
+   */
+  function diaDe(timestamp) {
+    const data = new Date(timestamp);
+    const mes = String(data.getMonth() + 1).padStart(2, "0");
+    const dia = String(data.getDate()).padStart(2, "0");
+
+    return data.getFullYear() + "-" + mes + "-" + dia;
+  }
+
+  /**
+   * Anota no historico de UM anuncio o que a varredura leu hoje. ALTERA o
+   * historico recebido.
+   *
+   * Vendas por mes e faturamento por mes nao aparecem em tela nenhuma do ML:
+   * so da para MEDIR, guardando quanto o anuncio tinha em cada dia e
+   * comparando. Por isso a gravacao comeca antes de existir qualquer tela
+   * que mostre o resultado - um mes de conta exige um mes de leituras.
+   *
+   * As regras:
+   *
+   *   - So entra metrica LIDA NESTA varredura e COM rastro de origem - o
+   *     mesmo criterio do painel. Numero que so esta no cache, lido em outro
+   *     dia, nao vira dado de hoje: seria dar a hoje um numero de dias atras,
+   *     e a conta de um mes sairia errada.
+   *   - Um registro por dia, no mesmo formato do cache (numero + origem com
+   *     trecho, tela e hora): cada numero do historico continua conferivel.
+   *   - Numero novo no mesmo dia substitui o anterior - a ultima leitura do
+   *     dia e o fechamento dele. O mesmo numero lido de novo nao muda nada,
+   *     e o rastro fica o da primeira leitura que viu esse numero.
+   *   - Dia com mais de DIAS_DE_HISTORICO dias sai.
+   *
+   * @param {Object} historico { "AAAA-MM-DD": registro } de um anuncio
+   * @param {Object} novo o que a varredura leu para esse anuncio
+   * @param {number} agora
+   * @param {boolean} automatica true quando veio da busca em segundo plano
+   * @returns {boolean} true quando algo mudou e o historico precisa ser gravado
+   */
+  function registrarDia(historico, novo, agora, automatica) {
+    const hoje = diaDe(agora);
+    const origemNova = novo.origem || {};
+    let alterou = false;
+
+    METRICAS.forEach(function (metrica) {
+      if (novo[metrica] === undefined || !origemNova[metrica]) return;
+
+      const registro = historico[hoje] || {};
+      if (registro[metrica] === novo[metrica]) return;
+
+      // So a origem DESTA metrica: a outra, lida mais cedo no mesmo dia,
+      // continua com o rastro dela (a mesma regra por metrica do cache).
+      const soEsta = {};
+      soEsta[metrica] = origemNova[metrica];
+
+      registro[metrica] = novo[metrica];
+      registro.origem = mesclarOrigem(registro.origem, soEsta, agora, automatica);
+      historico[hoje] = registro;
+      alterou = true;
+    });
+
+    // Poda. O texto "AAAA-MM-DD" ordena como data, entao comparar texto basta.
+    const corte = diaDe(agora - DIAS_DE_HISTORICO * 24 * 60 * 60 * 1000);
+
+    Object.keys(historico).forEach(function (dia) {
+      if (dia < corte) {
+        delete historico[dia];
+        alterou = true;
+      }
+    });
+
+    return alterou;
+  }
+
   return {
+    PREFIXO_HISTORICO: PREFIXO_HISTORICO,
+    DIAS_DE_HISTORICO: DIAS_DE_HISTORICO,
     mudou: mudou,
     faltaOrigem: faltaOrigem,
     mesclarOrigem: mesclarOrigem,
-    mesclar: mesclar
+    mesclar: mesclar,
+    chaveDoHistorico: chaveDoHistorico,
+    diaDe: diaDe,
+    registrarDia: registrarDia
   };
 })();
