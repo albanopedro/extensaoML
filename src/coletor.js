@@ -18,23 +18,26 @@
 (function () {
   "use strict";
 
-  // Chave usada dentro do chrome.storage.local. Tudo da extensao fica
-  // agrupado embaixo dela para nao espalhar dados soltos.
-  const CHAVE_CACHE = "mlmetrics_dados";
+  // Os nomes das chaves do storage vem do gravacao.js (CHAVES), carregado
+  // antes deste arquivo: escritos a mao aqui e em outros tres arquivos, um
+  // erro de digitacao faria a aba gravar num nome e o painel ler de outro.
+
+  // O cache principal: numeros e rastro de cada anuncio.
+  const CHAVE_CACHE = MLMetricsGravacao.CHAVES.CACHE;
 
   // Guarda o que a extensao viu quando nao conseguiu capturar nada.
   // Serve para diagnostico remoto - ver salvarDiagnostico().
-  const CHAVE_DIAGNOSTICO = "mlmetrics_diagnostico";
+  const CHAVE_DIAGNOSTICO = MLMetricsGravacao.CHAVES.DIAGNOSTICO;
 
   // Ultimo erro inesperado da leitura (ver registrarErro). Existe porque
   // excecao no meio da varredura e invisivel para quem usa: a aba continua
   // aberta, nada aparece na tela e o diagnostico nao teria o que dizer.
-  const CHAVE_ERRO = "mlmetrics_erro";
+  const CHAVE_ERRO = MLMetricsGravacao.CHAVES.ERRO;
 
   // Enderecos de telas de vendedor que ja entregaram numeros, e quando
   // foi a ultima busca automatica neles.
-  const CHAVE_ORIGENS = "mlmetrics_origens";
-  const CHAVE_ULTIMA_BUSCA = "mlmetrics_ultima_busca";
+  const CHAVE_ORIGENS = MLMetricsGravacao.CHAVES.ORIGENS;
+  const CHAVE_ULTIMA_BUSCA = MLMetricsGravacao.CHAVES.ULTIMA_BUSCA;
 
   // Busca automatica das telas de vendedor (ver atualizarEmSegundoPlano):
   // DESLIGADA. As telas de vendedor do ML sao montadas por JavaScript, e o

@@ -10,7 +10,8 @@
 // todas as abas e grava uma leitura de cada vez.
 //
 // Aqui fica so a REGRA, sem chrome.storage - a do cache (mesclar) e a do
-// historico diario (registrarDia). O arquivo e carregado:
+// historico diario (registrarDia) - e os NOMES das chaves do storage (CHAVES),
+// que todo o resto usa daqui. O arquivo e carregado:
 //   - no service worker (importScripts), que faz a gravacao de verdade;
 //   - nas abas (manifest), onde serve de plano B quando o service worker nao
 //     responde - melhor gravar com risco de corrida do que perder a leitura;
@@ -30,6 +31,30 @@ var MLMetricsGravacao = (function () {
   // renovado. Reconfirmar a cada varredura gravaria no storage a cada 600ms
   // sem parar; 2 minutos equilibra frescor com nao pesar em I/O.
   const INTERVALO_RENOVACAO_MS = 2 * 60 * 1000;
+
+  // Nomes das chaves da extensao no chrome.storage.local. Moram aqui porque
+  // este e o unico arquivo carregado em TODOS os lugares que usam o storage:
+  // service worker, abas (coletor e painel) e popup. Antes, "mlmetrics_dados"
+  // estava escrito a mao em quatro arquivos - um erro de digitacao em um deles
+  // quebraria a extensao sem erro nenhum: a aba gravaria num nome e o painel
+  // leria de outro.
+  //
+  // Os VALORES nao podem mudar: sao o endereco do que ja esta guardado no
+  // navegador da cliente. Trocar "mlmetrics_dados" por outro nome faria a
+  // versao nova nao achar nada do que a antiga gravou. O harness prende os
+  // valores, e o Object.freeze impede que alguem os altere em execucao.
+  //
+  // Todos comecam com PREFIXO_CHAVES: o "Limpar dados guardados" do popup
+  // apaga pelo prefixo, entao chave nova ja nasce coberta.
+  const PREFIXO_CHAVES = "mlmetrics_";
+
+  const CHAVES = Object.freeze({
+    CACHE: "mlmetrics_dados",
+    DIAGNOSTICO: "mlmetrics_diagnostico",
+    ERRO: "mlmetrics_erro",
+    ORIGENS: "mlmetrics_origens",
+    ULTIMA_BUSCA: "mlmetrics_ultima_busca"
+  });
 
   // Historico diario (ver registrarDia): uma chave por anuncio no storage,
   // "mlmetrics_historico_MLB123". Uma chave so para todos obrigaria a
@@ -285,6 +310,8 @@ var MLMetricsGravacao = (function () {
   }
 
   return {
+    PREFIXO_CHAVES: PREFIXO_CHAVES,
+    CHAVES: CHAVES,
     PREFIXO_HISTORICO: PREFIXO_HISTORICO,
     DIAS_DE_HISTORICO: DIAS_DE_HISTORICO,
     mudou: mudou,

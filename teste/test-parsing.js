@@ -1103,6 +1103,40 @@ MLMetricsGravacao.registrarDia(histAuto, leituraDe(7, undefined, "f"), DIA_18, t
 testar("historico: marca leitura da busca automatica", true,
   histAuto["2026-09-18"].origem.visitas.automatica);
 
+console.log("");
+console.log("=== chaves do storage num lugar so (lote 26b) ===");
+// Os nomes sao o ENDERECO do que ja esta guardado no navegador da cliente:
+// trocar "mlmetrics_dados" por outro nome faria a versao nova nao achar nada
+// do que a antiga gravou. Por isso os valores ficam presos aqui.
+testar("chaves: os nomes de sempre", JSON.stringify({
+  CACHE: "mlmetrics_dados",
+  DIAGNOSTICO: "mlmetrics_diagnostico",
+  ERRO: "mlmetrics_erro",
+  ORIGENS: "mlmetrics_origens",
+  ULTIMA_BUSCA: "mlmetrics_ultima_busca"
+}), JSON.stringify(MLMetricsGravacao.CHAVES));
+testar("chaves: prefixo do historico de sempre", "mlmetrics_historico_",
+  MLMetricsGravacao.PREFIXO_HISTORICO);
+testar("chaves: todas comecam com o prefixo que o Limpar apaga", "",
+  Object.keys(MLMetricsGravacao.CHAVES)
+    .map(function (nome) { return MLMetricsGravacao.CHAVES[nome]; })
+    .concat(MLMetricsGravacao.PREFIXO_HISTORICO)
+    .filter(function (chave) { return chave.indexOf(MLMetricsGravacao.PREFIXO_CHAVES) !== 0; })
+    .join(", "));
+testar("chaves: nao da para alterar durante a execucao", true,
+  Object.isFrozen(MLMetricsGravacao.CHAVES));
+
+// Nome de chave escrito a mao fora do gravacao.js e exatamente o erro que
+// esta mudanca evita: a aba gravaria num nome e o painel leria de outro.
+const PASTA_SRC = path.join(__dirname, "..", "src");
+const escritasAMao = fs.readdirSync(PASTA_SRC)
+  .filter(function (nome) { return /\.js$/.test(nome) && nome !== "gravacao.js"; })
+  .filter(function (nome) {
+    return /["']mlmetrics_/.test(fs.readFileSync(path.join(PASTA_SRC, nome), "utf8"));
+  });
+testar("chaves: nenhum outro arquivo de src/ escreve nome de chave a mao", "",
+  escritasAMao.join(", "));
+
 // ----------------------------------------------------------------------------
 // Service worker (background.js) - com chrome falso, sem navegador
 // ----------------------------------------------------------------------------

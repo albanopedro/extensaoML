@@ -19,8 +19,13 @@
 (function () {
   "use strict";
 
+  // Prefixo dos ids e classes do painel NA PAGINA ("mlmetrics-painel"). Nao
+  // e chave de storage: o content.css usa os mesmos nomes.
   const PREFIXO = "mlmetrics";
-  const CHAVE_CACHE = "mlmetrics_dados";
+
+  // Nome da chave do cache no storage - definido so no gravacao.js (CHAVES),
+  // carregado antes deste arquivo.
+  const CHAVE_CACHE = MLMetricsGravacao.CHAVES.CACHE;
 
   // Pagina cujo painel a pessoa fechou nesta aba (a chave de chaveDaPagina).
   // Para essa pagina o painel nao volta sozinho - nem por gravacao nova no

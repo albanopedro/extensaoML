@@ -287,9 +287,10 @@
   // Os arquivos da extensao na MESMA ORDEM do manifest: cada um usa as
   // variaveis globais dos que vieram antes (MLMetricsLeitura, MLMetricsCalculo).
   // Que o manifest segue esta ordem, quem confere e o teste em Node.
+  // O painel tambem usa o gravacao.js (nomes das chaves do storage, lote 26b).
   const SCRIPTS_COLETOR = ["/src/gravacao.js", "/src/leitura.js", "/src/diagnostico.js", "/src/coletor.js"];
-  const SCRIPTS_PAINEL = ["/src/calculo.js", "/src/content.js"];
-  const SCRIPTS_TODOS = SCRIPTS_COLETOR.concat(SCRIPTS_PAINEL);
+  const SCRIPTS_PAINEL = ["/src/gravacao.js", "/src/calculo.js", "/src/content.js"];
+  const SCRIPTS_TODOS = SCRIPTS_COLETOR.concat(["/src/calculo.js", "/src/content.js"]);
 
   async function rodar() {
     // --- 1. Coletor sobre "Minhas publicacoes" ------------------------------

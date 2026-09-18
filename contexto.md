@@ -3,7 +3,7 @@
 > Cole este arquivo inteiro no início de uma nova conversa. Ele contém tudo que é
 > preciso saber para continuarmos corrigindo os problemas sem refazer a análise.
 >
-> **Atualizado em 18/09/2026, depois do lote 26 (histórico diário gravado, ainda sem exibir).** O que falta fazer está
+> **Atualizado em 18/09/2026, depois do lote 26b (chaves do storage num lugar só).** O que falta fazer está
 > na **seção 5**. O que já foi feito está resumido e sinalizado na **seção 6**.
 
 ---
@@ -31,6 +31,10 @@ envolvido → propõe a correção → aplicamos.**
   arquivos de `src/` conversam por variáveis globais (`MLMetricsLeitura`,
   `MLMetricsDiagnostico`, `MLMetricsCalculo`, `MLMetricsGravacao`), na ordem do
   `manifest.json` — cada arquivo depois de quem ele usa (o harness confere).
+- **Nome de chave do storage só no `gravacao.js`** (`MLMetricsGravacao.CHAVES`,
+  `PREFIXO_CHAVES`, `PREFIXO_HISTORICO`). Nunca escreva `"mlmetrics_…"` à mão em outro
+  arquivo (o harness recusa) e nunca mude um valor: é o endereço do que já está
+  guardado no navegador da cliente.
 - **Preserve o estilo dos comentários.** O código é fortemente comentado em português
   sem acentos, explicando o *porquê* de cada decisão. Toda alteração precisa manter
   esse padrão, inclusive atualizando o comentário quando o comportamento mudar.
@@ -38,7 +42,7 @@ envolvido → propõe a correção → aplicamos.**
 - **Sem acentos nos comentários de código** (o projeto segue isso). Em texto de
   interface exibido para a usuária, acentos normais.
 - **Antes de corrigir, confirme a linha.** Os números de linha da seção 5 valem para o
-  estado do código em **18/09/2026, depois do lote 26**. Depois de cada correção eles
+  estado do código em **18/09/2026, depois do lote 26b**. Depois de cada correção eles
   saem do lugar.
 - **Toda correção entra com caso de teste**: no harness (`node teste/test-parsing.js`)
   quando a função for testável fora do navegador; na página de teste
@@ -59,7 +63,7 @@ envolvido → propõe a correção → aplicamos.**
 (visitas, vendas, conversão, receita estimada) nos anúncios do Mercado Livre de uma
 vendedora.
 
-Caminho: `C:\codes\extensaoML` · versão no manifest: **0.2.0**
+Caminho: `C:\codes\extensaoML` · versão no manifest: **0.2.1**
 
 **Restrição central do projeto:** a API pública do Mercado Livre devolve 403 e
 exigiria OAuth ou cookie de sessão. Por isso a extensão **raspa a tela** em vez de
@@ -119,6 +123,8 @@ extensaoML/
 ### Chaves usadas no `chrome.storage.local`
 
 Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo prefixo.
+Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado com
+`Object.freeze`), e usados dali pelo service worker, pelas abas e pelo popup (lote 26b).
 
 | Chave | Conteúdo |
 |---|---|
@@ -222,10 +228,11 @@ Todas começam com `mlmetrics_`. O botão "Limpar dados guardados" apaga pelo pr
 | Pedido do Pedro (17/09) — lote 24 | ✅ **erro visível**: `coletar()` e o diagnóstico em `try/catch`, `mlmetrics_erro` no storage, aviso vermelho no popup e `ultimoErro` no relatório. Mais os testes que faltavam da 0.1.7 e o buraco que ela abriu (`31.04.2023` virava 31.042.023) fechado em `motivoDoNumero`. |
 | Pedido do Pedro (17/09) — lote 25 | ✅ **`coletor.js` dividido** (2.015 → 696 linhas): a leitura foi para `leitura.js` e a montagem do diagnóstico para `diagnostico.js`; as contas e formatos do painel saíram do `content.js` para `calculo.js`. O harness **não recorta mais função do texto-fonte**: carrega os arquivos como são. Nenhum comportamento mudou. Junto, os quatro `var` da 0.1.7 viraram `const`/`let`. |
 | Pedido do Pedro (18/09) — lote 26 | ✅ **histórico diário gravado** (ainda sem exibir): cada leitura entra num registro por dia e por anúncio, com rastro, para no futuro dar vendas/mês e faturamento/mês. `unlimitedStorage` no manifest. E o popup passou a usar a regra de mascarar do `leitura.js` em vez de uma cópia. |
+| Pedido do Pedro (18/09) — lote 26b | ✅ **chaves do storage num lugar só**: `"mlmetrics_dados"` e as outras estavam escritas à mão em 5 arquivos; agora só no `gravacao.js`, e o harness recusa nome escrito à mão. Nenhum comportamento mudou. |
 | Revisão 1 — resíduo #21 | ✅ corrida entre abas resolvida no lote 22 (gravação única no service worker). |
-| Harness | **261/261 PASS** (+24 no lote 26: regras do histórico diário, histórico no service worker com gravações simultâneas, ordem dos scripts do `popup.html` e `unlimitedStorage`). `node --check` ok em todos os JS. |
+| Harness | **267/267 PASS** (+6 no lote 26b: nomes das chaves presos, prefixo comum, `CHAVES` congelado e nenhum nome escrito à mão fora do `gravacao.js`). `node --check` ok em todos os JS. |
 | Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **49/49 PASS** (+7 no lote 26: histórico gravado pela aba, e o popup de verdade aberto com `chrome` falso — lista, origem mascarada pelo `leitura.js`, resumo do histórico sem os números de cada dia). Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
-| Pacote | `dist\ML-Metrics-0.2.0.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
+| Pacote | `dist\ML-Metrics-0.2.1.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
 
 ### ⚠️ Repositório público — decisão do Pedro
 
@@ -242,7 +249,7 @@ git/GitHub — é ação do Pedro.
 O harness e o teste no navegador (`teste/rodar-no-navegador.html`) cobrem os itens 1, 3,
 5, 6 e 7 com `chrome` falso, e o item 8 no Node; falta confirmar com a extensão de
 verdade (mensagens popup ↔ aba ↔ service worker e storage reais). Com a extensão
-carregada (0.2.0):
+carregada (0.2.1):
 
 1. **#44** — numa aba do ML, ícone → "Copiar diagnóstico": o relatório tem `telaAtual`
    com `host`, `caminho` mascarado, `vitrine`, `mencionaVisita`, `capturariaAgora`,
@@ -266,7 +273,7 @@ carregada (0.2.0):
    trecho de cada um.
 8. **#21** — com duas telas de vendedor abertas em abas diferentes (F5 nas duas), o
    popup lista os anúncios das duas; nenhuma apaga o que a outra gravou.
-9. **Popup** — o título mostra "ML Metrics v0.2.0".
+9. **Popup** — o título mostra "ML Metrics v0.2.1".
 10. **Histórico (lote 26)** — depois de capturar numa tela de vendedor, "Copiar
     diagnóstico": `historico.anuncios` > 0 e `historico.ultimoDia` = hoje. Em
     `edge://extensions` → Detalhes da ML Metrics, a extensão aceita a permissão nova
@@ -275,9 +282,9 @@ carregada (0.2.0):
 
 ### Ação pendente (depois da verificação)
 
-1. Rodar `empacotar.ps1` e enviar `dist\ML-Metrics-0.2.0.zip` à cliente.
+1. Rodar `empacotar.ps1` e enviar `dist\ML-Metrics-0.2.1.zip` à cliente.
 2. A cliente segue **"Depois de uma atualização"** do guia: substituir os arquivos na
-   mesma pasta, recarregar a extensão, conferir a versão **0.2.0** (também no popup),
+   mesma pasta, recarregar a extensão, conferir a versão **0.2.1** (também no popup),
    **F5** nas abas do ML.
 3. A cliente clica **"Limpar dados guardados"** (agora apaga também as origens
    envenenadas pelo build antigo).
@@ -342,7 +349,7 @@ código**: são decisões e ações do Pedro fora do repositório/extensão em s
 | # | Sev. | Título | Status | Quem resolve |
 |---|---|---|---|---|
 | #50 | MÉDIO | Privacidade no repositório GitHub (resíduo: repo público + histórico) | ⚠️ parcial | Pedro (GitHub) |
-| — | — | Commit do lote 26, verificação manual (10 itens), envio da 0.2.0 à cliente | ⬜ | Pedro |
+| — | — | Commit do lote 26b, verificação manual (10 itens), envio da 0.2.1 à cliente | ⬜ | Pedro |
 
 ---
 
@@ -540,6 +547,17 @@ depois da conferência dos 3 anúncios e do #47 (ver seção 5.1).
 | Guia da cliente | "O que a extensão faz por conta própria" explica a anotação diária, só no navegador dela, e que "Limpar" apaga junto. |
 | Testes | Harness +24 → **261/261** (regras do histórico; histórico no SW com três gravações simultâneas; remetente de fora não cria histórico; ordem dos scripts do `popup.html` pela mesma `conferirOrdem` do manifest; `unlimitedStorage`). Navegador +7 → **49/49** (histórico gravado pela aba na fixture; popup de verdade aberto como `srcdoc` com `chrome` falso). `manifest.json` → **0.2.0**. |
 
+### Lote 26b — chaves do storage num lugar só (18/09/2026)
+
+Pedido do Pedro ("arroche"). **Nenhum comportamento mudou.**
+
+| Item | O que foi feito |
+|---|---|
+| Problema | Os nomes das chaves estavam escritos à mão em 5 arquivos (`background.js`, `coletor.js`, `content.js`, `popup.js` e o prefixo do histórico no `gravacao.js`): 12 declarações. Erro de digitação em uma delas quebraria a extensão sem erro nenhum — a aba gravaria num nome e o painel leria de outro. |
+| Solução | `gravacao.js` define `PREFIXO_CHAVES` e `CHAVES` (congelado com `Object.freeze`), porque é o único arquivo carregado em todos os lugares: service worker, abas e popup. Os outros arquivos mantêm os nomes locais (`CHAVE_CACHE`...), mas o valor vem de `MLMetricsGravacao.CHAVES`. |
+| Ordem | `content.js` passou a usar o `gravacao.js` — já é o primeiro do manifest; a `conferirOrdem` do harness confere. O teste no navegador carrega o `gravacao.js` também nos cenários só do painel. |
+| Testes | Harness +6 → **267/267**: valores presos (renomear uma chave faria a versão nova não achar o que a antiga gravou), todos com o prefixo do "Limpar", `CHAVES` congelado, e **nenhum arquivo de `src/` além do `gravacao.js` com `"mlmetrics_` escrito à mão**. Navegador **49/49**. `manifest.json` → **0.2.1**. |
+
 ---
 
 ## 7. Leitura de conjunto (o diagnóstico de fundo)
@@ -617,7 +635,8 @@ tela real disser o que o número significa (#47), o histórico já estará lá, 
 | — | 24 — Erro visível + dívida da 0.1.7 | — | ✅ | Feito em 17/09. |
 | — | 25 — `coletor.js` dividido + harness sem extrator | — | ✅ | Feito em 17/09. |
 | — | 26 — Histórico diário gravado + popup sem cópia de regra | — | ✅ | Feito em 18/09. Exibir fica para o lote 27. |
-| 1 | **Commit + verificação manual + decisão do repositório** | #21, #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.2.0 para a cliente. |
+| — | 26b — Chaves do storage num lugar só | — | ✅ | Feito em 18/09. |
+| 1 | **Commit + verificação manual + decisão do repositório** | #21, #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.2.1 para a cliente. |
 | 2 | **★ Ação — capturar "Minhas publicações" real + conferência de 3 anúncios** | — | ⬜ | "Copiar diagnóstico" na tela (`telaAtual`, com `resumoDasRecusas`) e passo 7 do guia. Decide #47 e valida #38, #48 e #57. |
 | 3 | **23b — Período no rastro** | #47 | ⬜ | Com o `telaAtual.periodo` da tela real, registrar o recorte (7/30 dias) junto do rastro. |
 | 4 | **Decisão — religar a busca automática?** | — | ⬜ | Só se a tela real mostrar que o HTML buscado traz os números. |
@@ -685,6 +704,7 @@ paramos.
 | 24 — Erro visível | ✅ feito | 17/09/2026 | Pedido do Pedro ("o que dá para melhorar"). **Falha silenciosa:** `coletar()` e o diagnóstico em `try/catch`; `registrarErro` grava `mlmetrics_erro` (onde, mensagem, 3 linhas de pilha, host, tela mascarada, hora, versão) com trava de 1 min; aviso vermelho no popup e `ultimoErro` no relatório. **Dívida da 0.1.7:** `motivoDoNumero` recusa a forma de data com ponto — sem isso, `31.04.2023` virava 31.042.023 visitas. Harness **231/231**, navegador **42/42**. `manifest.json` → **0.1.8**, zip gerado. |
 | 25 — `coletor.js` dividido | ✅ feito | 17/09/2026 | Pedido do Pedro (itens 2 e 3 das melhorias). `leitura.js` (`MLMetricsLeitura`), `diagnostico.js` (`MLMetricsDiagnostico`) e `calculo.js` (`MLMetricsCalculo`) saíram de `coletor.js` (2.015 → 696) e `content.js` (747 → 435), com o texto exato de cada função movido por script e as chamadas entre arquivos prefixadas. `diagnosticarTelaAtual()` → `diagnosticarTela(doc, local)`. Manifest na ordem de dependência. Harness sem extrator (`carregarModulo`), +6 casos da ordem do manifest → **237/237**; navegador **42/42**. Os quatro `var` da 0.1.7 → `const`/`let`. `manifest.json` → **0.1.9**, zip gerado. |
 | 26 — Histórico diário | ✅ feito | 18/09/2026 | Pedido do Pedro ("gravar agora, sem mostrar" + popup sem cópia). `registrarDia`/`diaDe`/`chaveDoHistorico` no `gravacao.js`; `gravarHistorico` no SW e `gravarHistoricoNestaAba` no plano B, na mesma fila e depois do cache; chave `mlmetrics_historico_<código>`, 400 dias, só métrica lida e com rastro. `unlimitedStorage`. Popup carrega `leitura.js`/`gravacao.js` (sem cópia do `caminhoMascarado`) e resume o histórico no relatório. Guia atualizado. Harness **261/261**, navegador **49/49**. `manifest.json` → **0.2.0**, zip gerado. |
+| 26b — Chaves num lugar só | ✅ feito | 18/09/2026 | Pedido do Pedro ("arroche"). `PREFIXO_CHAVES` e `CHAVES` (congelado) no `gravacao.js`; `background.js`, `coletor.js`, `content.js` e `popup.js` usam dali (eram 12 declarações escritas à mão). Harness +6 → **267/267** (valores presos, prefixo, congelado, nenhum literal fora do `gravacao.js`); navegador **49/49** (painel carrega `gravacao.js`). `manifest.json` → **0.2.1**, zip gerado. |
 | 27 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
-| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.0: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
+| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.1: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |

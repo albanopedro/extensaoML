@@ -15,22 +15,25 @@
 (function () {
   "use strict";
 
-  const CHAVE_CACHE = "mlmetrics_dados";
-  const CHAVE_DIAGNOSTICO = "mlmetrics_diagnostico";
+  // Os nomes das chaves do storage vem do gravacao.js (CHAVES), carregado
+  // pelo popup.html antes deste arquivo - os mesmos das abas e do service
+  // worker, sem copia escrita a mao.
+  const CHAVE_CACHE = MLMetricsGravacao.CHAVES.CACHE;
+  const CHAVE_DIAGNOSTICO = MLMetricsGravacao.CHAVES.DIAGNOSTICO;
   // Telas de vendedor que ja entregaram numeros. Entram no relatorio copiado
   // para o diagnostico remoto dizer QUAIS telas a extensao reconheceu. Vao
   // MASCARADAS (ver enderecoMascarado): a forma da rota basta para achar
   // "Minhas publicacoes", sem levar id de vendedor ou de anuncio junto.
-  const CHAVE_ORIGENS = "mlmetrics_origens";
+  const CHAVE_ORIGENS = MLMetricsGravacao.CHAVES.ORIGENS;
 
   // Ultimo erro inesperado da leitura (gravado pelo coletor). Aparece em
   // vermelho no topo e vai no relatorio: erro que ninguem ve e o mesmo que
   // erro nenhum, e aqui ele explica por que nada apareceu na tela.
-  const CHAVE_ERRO = "mlmetrics_erro";
+  const CHAVE_ERRO = MLMetricsGravacao.CHAVES.ERRO;
 
   // Toda chave da extensao no storage comeca com este prefixo. O botao
   // "Limpar dados guardados" apaga pelo prefixo - ver la o porque.
-  const PREFIXO_CHAVES = "mlmetrics_";
+  const PREFIXO_CHAVES = MLMetricsGravacao.PREFIXO_CHAVES;
 
   const resumo = document.getElementById("resumo");
   const erro = document.getElementById("erro");

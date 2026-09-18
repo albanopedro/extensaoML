@@ -22,10 +22,11 @@
 // valer. So o fetch mora aqui; o parse do HTML continua no content script.
 // ============================================================================
 
-// A regra da mesclagem (MLMetricsGravacao), compartilhada com as abas.
+// As regras de gravar e os nomes das chaves do storage (MLMetricsGravacao),
+// os mesmos das abas e do popup.
 importScripts("gravacao.js");
 
-const CHAVE_CACHE = "mlmetrics_dados";
+const CHAVE_CACHE = MLMetricsGravacao.CHAVES.CACHE;
 
 // Quanto esperar por uma tela antes de desistir. Sem limite, um servidor que
 // nunca responde prenderia a busca - e o service worker acordado - ate o
