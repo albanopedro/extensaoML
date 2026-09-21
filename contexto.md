@@ -3,7 +3,7 @@
 > Cole este arquivo inteiro no início de uma nova conversa. Ele contém tudo que é
 > preciso saber para continuarmos corrigindo os problemas sem refazer a análise.
 >
-> **Atualizado em 21/09/2026, depois do lote 27 (conferência num clique e aviso de tela que parou).** O que falta fazer está
+> **Atualizado em 21/09/2026, depois do lote 28 (verificação no Edge automatizada).** O que falta fazer está
 > na **seção 5**. O que já foi feito está resumido e sinalizado na **seção 6**.
 
 ---
@@ -42,12 +42,13 @@ envolvido → propõe a correção → aplicamos.**
 - **Sem acentos nos comentários de código** (o projeto segue isso). Em texto de
   interface exibido para a usuária, acentos normais.
 - **Antes de corrigir, confirme a linha.** Os números de linha da seção 5 valem para o
-  estado do código em **21/09/2026, depois do lote 27**. Depois de cada correção eles
+  estado do código em **21/09/2026, depois do lote 28**. Depois de cada correção eles
   saem do lugar.
 - **Toda correção entra com caso de teste**: no harness (`node teste/test-parsing.js`)
   quando a função for testável fora do navegador; na página de teste
   (`node teste/servidor-teste.js` e abrir `teste/rodar-no-navegador.html`) quando
-  depender de DOM real, painel ou popup.
+  depender de DOM real, painel ou popup; e em `node teste/verificar-no-edge.js` quando
+  depender da extensão instalada (service worker, mensagens, storage de verdade).
 - **Nunca coloque dado real no repositório** (código MLB, título ou slug de produto,
   nome de vendedor). Use valores fictícios como `MLB1234567890` / `MLBU0000000001`.
   O repositório é público (ver #50).
@@ -111,7 +112,12 @@ extensaoML/
 │   │                               carrega leitura/diagnostico/calculo/gravacao
 │   │                               como sao, o service worker e a ordem do manifest.
 │   ├── servidor-teste.js           Servidor local (127.0.0.1, lista fechada).
-│   ├── rodar-no-navegador.html     Teste em DOM real (42 casos, 42/42 PASS).
+│   ├── rodar-no-navegador.html     Teste em DOM real (57 casos, 57/57 PASS).
+│   ├── verificar-no-edge.js        Os 11 itens da lista manual, com a extensao
+│   │                               INSTALADA no Edge (21 casos, 21/21 PASS).
+│   ├── edge-cdp.js                 A mecanica: sobe o Edge com a extensao,
+│   │                               serve as fixtures como https://...mercadolivre
+│   │                               e conversa por CDP (WebSocket do Node).
 │   ├── publicacoes.html            Fixture da tela "Minhas publicacoes", com gabarito.
 │   ├── MLB-1111111111-anuncio.html Fixture da pagina de anuncio, com gabarito.
 │   ├── vitrine-up-sanitizada.html  Fixture sanitizada da vitrine /up/ real.
@@ -244,9 +250,11 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
 | Pedido do Pedro (18/09) — lote 26 | ✅ **histórico diário gravado** (ainda sem exibir): cada leitura entra num registro por dia e por anúncio, com rastro, para no futuro dar vendas/mês e faturamento/mês. `unlimitedStorage` no manifest. E o popup passou a usar a regra de mascarar do `leitura.js` em vez de uma cópia. |
 | Pedido do Pedro (18/09) — lote 26b | ✅ **chaves do storage num lugar só**: `"mlmetrics_dados"` e as outras estavam escritas à mão em 5 arquivos; agora só no `gravacao.js`, e o harness recusa nome escrito à mão. Nenhum comportamento mudou. |
 | Pedido do Pedro (21/09) — lote 27 | ✅ **conferência num clique** (marca "bate"/"não bate" por anúncio, gravada, e "Copiar conferência" com o texto pronto) e **aviso de tela que parou de entregar números** (laranja no popup, quando uma tela que já funcionou deixa de entregar). |
+| Pedido do Pedro (21/09) — lote 28 | ✅ **verificação no Edge automatizada**: `node teste/verificar-no-edge.js` sobe o Edge com a extensão instalada e roda os 11 itens da antiga lista manual (**21/21**). Provado com defeito de propósito: quebrando o `extensaoViva` do `content.js`, o item do script órfão reprova. |
 | Revisão 1 — resíduo #21 | ✅ corrida entre abas resolvida no lote 22 (gravação única no service worker). |
 | Harness | **271/271 PASS** (+4 no lote 27: `ehOrigemConhecida` — tela que já entregou números, ignorando a query). `node --check` ok em todos os JS. |
 | Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **57/57 PASS** (+8 no lote 27: aviso laranja no popup; marcar, copiar e desmarcar a conferência; tela conhecida que parou vira aviso; tela desconhecida não; tela que voltou a entregar sai do aviso). Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
+| Verificação no Edge | ✅ **21/21 PASS** (lote 28): extensão instalada de verdade, a partir do ZIP de `dist/`. Cobre os 11 itens da lista manual. |
 | Pacote | `dist\ML-Metrics-0.2.2.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
 
 ### ⚠️ Repositório público — decisão do Pedro
@@ -259,12 +267,23 @@ arquivo não tira do histórico. O caminho simples é **tornar o repositório pr
 GitHub (Settings → General → Danger Zone → Change visibility). Claude não escreve em
 git/GitHub — é ação do Pedro.
 
-### Verificação manual pendente (Pedro, antes de enviar à cliente)
+### Verificação com a extensão instalada — agora automática (lote 28)
 
-O harness e o teste no navegador (`teste/rodar-no-navegador.html`) cobrem os itens 1, 3,
-5, 6 e 7 com `chrome` falso, e o item 8 no Node; falta confirmar com a extensão de
-verdade (mensagens popup ↔ aba ↔ service worker e storage reais). Com a extensão
-carregada (0.2.2):
+```bash
+node teste/verificar-no-edge.js            # sem janela
+node teste/verificar-no-edge.js --com-janela   # para ver acontecendo
+```
+
+Sobe o Edge com a extensão **instalada** (o ZIP mais recente de `dist/`, que é o que a
+cliente recebe), serve as fixtures como `https://www.mercadolivre.com.br/...` e roda os
+11 itens abaixo — **21/21 PASS**. É o único teste onde existem service worker, mensagens
+e `chrome.storage` de verdade. Precisa do Edge e do `openssl` (vem com o Git para
+Windows); nada sai da máquina e o perfil do Edge é novo, sem login.
+
+**O que ele NÃO cobre, e continua sendo de olho:** aparência do painel e do popup (cor,
+posição, texto cortado) e qualquer coisa na tela real do Mercado Livre.
+
+Os itens, todos cobertos pelo comando acima:
 
 1. **#44** — numa aba do ML, ícone → "Copiar diagnóstico": o relatório tem `telaAtual`
    com `host`, `caminho` mascarado, `vitrine`, `mencionaVisita`, `capturariaAgora`,
@@ -346,7 +365,7 @@ de vendedor (nunca vista — ver "Maior risco aberto" na seção 4):
 | # | Sev. | Título | Status | Depende da tela real? | Lote |
 |---|---|---|---|---|---|
 | #47 | MÉDIO | Período (7/30 dias) não é registrado junto do rastro (observer resolvido no lote 21; o período já vem no diagnóstico desde o lote 23a) | ⚠️ parcial | Sim (período) | 23b |
-| — | — | **Exibir vendas/mês e faturamento/mês** a partir do histórico diário (a gravação já existe desde o lote 26) | ⬜ | Sim — conferência dos 3 anúncios **e** #47 | 28 |
+| — | — | **Exibir vendas/mês e faturamento/mês** a partir do histórico diário (a gravação já existe desde o lote 26) | ⬜ | Sim — conferência dos 3 anúncios **e** #47 | 29 |
 | — | — | Decisão: religar a busca automática? | ⬜ | Sim (o HTML buscado traz os números?) | — |
 
 Nenhuma das três tem como avançar sem o `telaAtual.periodo`/`telaAtual` de uma tela de
@@ -592,6 +611,21 @@ projeto, e ela dependia de a cliente anotar números à mão.
 | Guia da cliente | Passo 7 reescrito para os botões e o "Copiar conferência"; "O que me contar" ganhou o aviso laranja. |
 | Testes | Harness +4 → **271/271** (`ehOrigemConhecida`: mesma URL, query ignorada, outra tela, sem origens). Navegador +8 → **57/57** (aviso laranja; marcar, copiar e desmarcar; tela conhecida que parou; tela desconhecida que não acusa; tela que voltou e saiu do aviso). `manifest.json` → **0.2.2**. |
 
+### Lote 28 — a verificação no Edge virou comando (21/09/2026)
+
+Pedido do Pedro. **Nenhuma mudança na extensão** — só ferramenta de teste (`teste/`).
+Antes, toda versão exigia o ritual: abrir o Edge, carregar a extensão, passar por telas
+e conferir 11 itens na mão.
+
+| Item | O que foi feito |
+|---|---|
+| Como funciona | `teste/edge-cdp.js` sobe o Edge **sem janela**, com perfil descartável e a extensão carregada por `--load-extension` (com `--disable-features=DisableLoadExtensionCommandLineSwitch`, exigido desde o Chromium 137). `--host-resolver-rules` manda `*.mercadolivre.com.br` para um servidor HTTPS local com as fixtures, e `--ignore-certificate-errors` aceita o certificado gerado na hora pelo `openssl`. Assim as páginas de teste têm o **endereço de verdade**, que é o que faz o manifest injetar os content scripts. A conversa com o navegador é por CDP, em WebSocket — o do próprio Node, sem dependência nova. |
+| O que ele carrega | O **ZIP mais recente de `dist/`**, descompactado num diretório temporário: é o que a cliente recebe, então o empacotamento entra na conta (já aconteceu de arquivo novo não entrar no zip). `--extensao=<pasta>` aponta para outra cópia. |
+| Os 21 casos | Captura numa tela de vendedor real (storage e service worker de verdade) e rastro; histórico do dia; diagnóstico da aba ativa com travas, período, amostras e recusas; aba fora do ML que não responde; duas telas de vendedor sem uma apagar a outra; painel no anúncio e o fechar que dura; popup com versão, rastro, conferência que sobrevive a reabrir, texto pronto e "Limpar"; e a extensão recarregada deixando a aba órfã — painel some, aba não responde, e volta depois do F5. |
+| Prova de que reprova | Rodado contra uma cópia com defeito de propósito (`extensaoViva` do `content.js` devolvendo sempre `true`): o item do script órfão **falhou**, como devia. Teste que nunca reprova não vale nada. |
+| Esperas | Nada de `sleep` fixo: cada passo espera a condição acontecer (`ate`). A primeira versão passava por causa de dado da rodada anterior — hoje o perfil do Edge é apagado a cada execução. |
+| O que continua de olho | Aparência do painel e do popup, e a tela real do Mercado Livre. |
+
 ---
 
 ## 7. Leitura de conjunto (o diagnóstico de fundo)
@@ -668,9 +702,10 @@ tela real disser o que o número significa (#47), o histórico já estará lá, 
 | — | 0.1.7 — robustez (Pedro) | — | ✅ | Feito em 15/09, testado no lote 24. |
 | — | 24 — Erro visível + dívida da 0.1.7 | — | ✅ | Feito em 17/09. |
 | — | 25 — `coletor.js` dividido + harness sem extrator | — | ✅ | Feito em 17/09. |
-| — | 26 — Histórico diário gravado + popup sem cópia de regra | — | ✅ | Feito em 18/09. Exibir fica para o lote 28. |
+| — | 26 — Histórico diário gravado + popup sem cópia de regra | — | ✅ | Feito em 18/09. Exibir fica para o lote 29. |
 | — | 26b — Chaves do storage num lugar só | — | ✅ | Feito em 18/09. |
 | — | 27 — Conferência num clique + aviso de tela que parou | — | ✅ | Feito em 21/09. |
+| — | 28 — Verificação no Edge automatizada | — | ✅ | Feito em 21/09. Só `teste/`. |
 | 1 | **Commit + verificação manual + decisão do repositório** | #21, #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.2.2 para a cliente. |
 | 2 | **★ Ação — capturar "Minhas publicações" real + conferência de 3 anúncios** | — | ⬜ | "Copiar diagnóstico" na tela (`telaAtual`, com `resumoDasRecusas`) e passo 7 do guia. Decide #47 e valida #38, #48 e #57. |
 | 3 | **23b — Período no rastro** | #47 | ⬜ | Com o `telaAtual.periodo` da tela real, registrar o recorte (7/30 dias) junto do rastro. |
@@ -693,8 +728,9 @@ O que eu espero de você em cada rodada:
 1. Ler o trecho de código real (os números de linha podem ter mudado).
 2. Explicar a correção em uma ou duas frases antes de escrever código.
 3. Aplicar mantendo o padrão de comentários do projeto.
-4. Acrescentar o caso de teste e rodar os dois testes: `node teste/test-parsing.js` e a
-   página `teste/rodar-no-navegador.html` (com `node teste/servidor-teste.js`).
+4. Acrescentar o caso de teste e rodar os três: `node teste/test-parsing.js`, a página
+   `teste/rodar-no-navegador.html` (com `node teste/servidor-teste.js`) e, quando mexer
+   em algo que depende do navegador, `node teste/verificar-no-edge.js`.
 5. Dizer o que **não** foi corrigido junto e por quê.
 6. Atualizar o resumo da seção 5, a seção 6 e o registro da seção 10.
 7. Se a mudança vai para a cliente: subir a versão no `manifest.json` e gerar o zip
@@ -741,6 +777,7 @@ paramos.
 | 26 — Histórico diário | ✅ feito | 18/09/2026 | Pedido do Pedro ("gravar agora, sem mostrar" + popup sem cópia). `registrarDia`/`diaDe`/`chaveDoHistorico` no `gravacao.js`; `gravarHistorico` no SW e `gravarHistoricoNestaAba` no plano B, na mesma fila e depois do cache; chave `mlmetrics_historico_<código>`, 400 dias, só métrica lida e com rastro. `unlimitedStorage`. Popup carrega `leitura.js`/`gravacao.js` (sem cópia do `caminhoMascarado`) e resume o histórico no relatório. Guia atualizado. Harness **261/261**, navegador **49/49**. `manifest.json` → **0.2.0**, zip gerado. |
 | 26b — Chaves num lugar só | ✅ feito | 18/09/2026 | Pedido do Pedro ("arroche"). `PREFIXO_CHAVES` e `CHAVES` (congelado) no `gravacao.js`; `background.js`, `coletor.js`, `content.js` e `popup.js` usam dali (eram 12 declarações escritas à mão). Harness +6 → **267/267** (valores presos, prefixo, congelado, nenhum literal fora do `gravacao.js`); navegador **49/49** (painel carrega `gravacao.js`). `manifest.json` → **0.2.1**, zip gerado. |
 | 27 — Conferência e aviso de tela | ✅ feito | 21/09/2026 | Pedido do Pedro. Popup: "✓ bate"/"✗ não bate" por anúncio (gravado em `mlmetrics_conferencia`, sobrevive ao popup fechar, clique repetido desmarca) e "Copiar conferência" com números + trecho « ». Coletor: `marcarTelaFalhando`/`limparTelaFalhando` + `ehOrigemConhecida` → aviso laranja quando uma tela que já entregou números para de entregar. Guia: passo 7 e "O que me contar". Harness **271/271**, navegador **57/57**. `manifest.json` → **0.2.2**, zip gerado. |
-| 28 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
+| 28 — Verificação no Edge | ✅ feito | 21/09/2026 | Pedido do Pedro. `teste/verificar-no-edge.js` + `teste/edge-cdp.js`: Edge sem janela com a extensão instalada (ZIP de `dist/`), fixtures servidas como `https://www.mercadolivre.com.br/...`, conversa por CDP. **21/21**, cobrindo os 11 itens da antiga lista manual. Reprova provada com cópia quebrada de propósito. Nenhum arquivo de `src/` mudou. |
+| 29 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
 | ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.2: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |
