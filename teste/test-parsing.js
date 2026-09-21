@@ -93,6 +93,7 @@ const {
   valorDoRotulo,
   lerRotulo,
   ehPaginaDeCompra,
+  ehOrigemConhecida,
   paginaMencionaVisita,
   varrerPagina,
   ROTULOS,
@@ -940,6 +941,24 @@ testar("milhar com ponto continua sendo metrica", 1299500,
 // endereco estranho). A leitura nao pode parar por causa disso, e o rastro
 // precisa dizer que a tela nao pode ser identificada.
 testar("url invalida nao e vitrine", false, ehPaginaDeCompra("nao-e-uma-url"));
+
+console.log("");
+console.log("=== tela que entregava numeros e parou (lote 27) ===");
+// Separar "tela que nunca deu nada" de "tela que dava e parou": so a segunda
+// e sinal de que o ML mudou de layout. A comparacao ignora a query, porque e
+// assim que as origens sao guardadas (filtro e pagina mudam a query).
+const ORIGENS_APRENDIDAS = [
+  "https://www.mercadolivre.com.br/anuncios/lista",
+  "https://www.mercadolivre.com.br/vendas"
+];
+testar("tela conhecida: mesma URL", true,
+  ehOrigemConhecida("https://www.mercadolivre.com.br/anuncios/lista", ORIGENS_APRENDIDAS));
+testar("tela conhecida: a query nao conta", true,
+  ehOrigemConhecida("https://www.mercadolivre.com.br/anuncios/lista?pagina=2", ORIGENS_APRENDIDAS));
+testar("tela conhecida: outra tela do ML nao conta", false,
+  ehOrigemConhecida("https://www.mercadolivre.com.br/", ORIGENS_APRENDIDAS));
+testar("tela conhecida: sem origens aprendidas, nada e conhecido", false,
+  ehOrigemConhecida("https://www.mercadolivre.com.br/anuncios/lista", undefined));
 const rUrlInvalida = varrerPagina(documentoDa(corpoVendedor), "nao-e-uma-url");
 testar("url invalida: a leitura continua", 359, rUrlInvalida["MLB3456789012"].visitas);
 testar("url invalida: o rastro diz que a tela e desconhecida", "(url invalida)",
@@ -1113,7 +1132,9 @@ testar("chaves: os nomes de sempre", JSON.stringify({
   DIAGNOSTICO: "mlmetrics_diagnostico",
   ERRO: "mlmetrics_erro",
   ORIGENS: "mlmetrics_origens",
-  ULTIMA_BUSCA: "mlmetrics_ultima_busca"
+  ULTIMA_BUSCA: "mlmetrics_ultima_busca",
+  CONFERENCIA: "mlmetrics_conferencia",
+  TELAS_FALHANDO: "mlmetrics_telas_falhando"
 }), JSON.stringify(MLMetricsGravacao.CHAVES));
 testar("chaves: prefixo do historico de sempre", "mlmetrics_historico_",
   MLMetricsGravacao.PREFIXO_HISTORICO);

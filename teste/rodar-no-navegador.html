@@ -494,7 +494,8 @@
       mlmetrics_historico_MLB1111111111: {
         "2026-09-17": { visitas: 351, origem: { visitas: { trecho: "«351 visitas» marcador-do-historico", tela: "/anuncios/lista", em: 1 } } },
         "2026-09-18": { visitas: 359, origem: { visitas: { trecho: "«359 visitas» marcador-do-historico", tela: "/anuncios/lista", em: 2 } } }
-      }
+      },
+      mlmetrics_telas_falhando: { "/anuncios/lista": { quando: Date.now(), versao: "teste" } }
     };
     const popup = await abrirPopup(armazemPopup);
     await esperar(300);
@@ -523,6 +524,79 @@
       ].join("/") : null);
     testar("popup: o relatorio nao leva os numeros de cada dia", -1,
       textoDoRelatorio.indexOf("marcador-do-historico"));
+
+    // --- 9. Aviso de tela que parou e conferencia (lote 27) ----------------
+    const avisoDeTela = popup.documento.getElementById("telas");
+
+    testar("popup: avisa a tela que parou de entregar numeros", true,
+      avisoDeTela.hidden === false && /parou de trazer/.test(avisoDeTela.textContent));
+
+    popup.documento.querySelector(".item .conferir button").click();
+    await esperar(300);
+
+    const marca = (armazemPopup.mlmetrics_conferencia || {}).MLB1111111111;
+    testar("popup: a marca da conferencia e gravada (sobrevive ao popup fechar)", "bate",
+      marca ? marca.resultado : "sem marca");
+
+    popup.documento.getElementById("conferencia").click();
+    await esperar(300);
+
+    const textoDaConferencia = popup.documento.getElementById("diagnostico").value;
+    testar("popup: o texto da conferencia traz o resultado", true,
+      /BATEU — MLB1111111111/.test(textoDaConferencia));
+    testar("popup: e o trecho de onde o numero foi lido", true,
+      /359 visitas/.test(textoDaConferencia));
+
+    // Clicar de novo no mesmo botao desmarca: erro de clique nao pode virar
+    // resultado errado do outro lado.
+    popup.documento.querySelector(".item .conferir button").click();
+    await esperar(300);
+
+    testar("popup: clicar de novo desmarca", undefined,
+      (armazemPopup.mlmetrics_conferencia || {}).MLB1111111111);
+
+    // --- 10. Tela conhecida que parou de entregar numeros ------------------
+    const enderecoDoAnuncio = location.origin + "/teste/MLB-1111111111-anuncio.html";
+    const armazemParou = { mlmetrics_origens: [enderecoDoAnuncio] };
+    const parou = await abrirFixture(
+      "/teste/MLB-1111111111-anuncio.html?caso=parou",
+      armazemParou,
+      SCRIPTS_COLETOR
+    );
+    await esperar(700);
+
+    const leitura = parou.documento.defaultView.MLMetricsLeitura;
+    const telaDoAnuncio = leitura.caminhoMascarado("/teste/MLB-1111111111-anuncio.html");
+    const telaDaLista = leitura.caminhoMascarado("/teste/publicacoes.html");
+
+    testar("tela conhecida que parou de entregar vira aviso", true,
+      Boolean((armazemParou.mlmetrics_telas_falhando || {})[telaDoAnuncio]));
+
+    // Tela que NUNCA entregou numeros nao acusa nada: a maioria das paginas
+    // do ML esta nesse caso, e um aviso a toa nao significaria nada.
+    const armazemDesconhecida = {};
+    await abrirFixture(
+      "/teste/MLB-1111111111-anuncio.html?caso=desconhecida",
+      armazemDesconhecida,
+      SCRIPTS_COLETOR
+    );
+    await esperar(700);
+
+    testar("tela que nunca entregou numeros nao vira aviso", undefined,
+      armazemDesconhecida.mlmetrics_telas_falhando);
+
+    // E quando a tela volta a entregar, o aviso sai sozinho.
+    const armazemVoltou = {
+      mlmetrics_origens: [location.origin + "/teste/publicacoes.html"],
+      mlmetrics_telas_falhando: {}
+    };
+    armazemVoltou.mlmetrics_telas_falhando[telaDaLista] = { quando: 1, versao: "teste" };
+
+    await abrirFixture("/teste/publicacoes.html?caso=voltou", armazemVoltou, SCRIPTS_COLETOR);
+    await esperar(900);
+
+    testar("tela que voltou a entregar sai do aviso", 0,
+      Object.keys(armazemVoltou.mlmetrics_telas_falhando || {}).length);
   }
 
   function mostrarResumo() {

@@ -53,7 +53,14 @@ var MLMetricsGravacao = (function () {
     DIAGNOSTICO: "mlmetrics_diagnostico",
     ERRO: "mlmetrics_erro",
     ORIGENS: "mlmetrics_origens",
-    ULTIMA_BUSCA: "mlmetrics_ultima_busca"
+    ULTIMA_BUSCA: "mlmetrics_ultima_busca",
+    // O que a vendedora marcou na conferencia ("bate" / "nao bate"), por
+    // anuncio. Fica no storage porque o popup FECHA a cada clique fora dele:
+    // sem gravar, a marca sumiria quando ela fosse olhar a tela do ML.
+    CONFERENCIA: "mlmetrics_conferencia",
+    // Telas que ja entregaram numeros e pararam de entregar (ver
+    // marcarTelaFalhando no coletor.js).
+    TELAS_FALHANDO: "mlmetrics_telas_falhando"
   });
 
   // Historico diario (ver registrarDia): uma chave por anuncio no storage,

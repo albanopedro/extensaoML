@@ -84,11 +84,18 @@ deles faz o navegador continuar usando a versão antiga:
    é porque ela ainda não tem números conferidos desse anúncio.
 
 7. **Confira os números — é o passo mais importante.** Escolha 3 anúncios:
-   - Anote as visitas e as vendas que o **Mercado Livre** mostra para cada um
-     em "Minhas publicações".
+   - Em "Minhas publicações", veja as visitas e as vendas que o **Mercado
+     Livre** mostra para cada um.
    - Clique no **ícone da extensão**. Cada anúncio aparece com os números e,
      embaixo de cada número, **o pedaço de texto de onde ele foi lido** (a
      parte entre « »), a tela e a hora.
+   - Em cada um dos 3, clique em **"✓ bate"** ou **"✗ não bate"**, comparando
+     com o que o Mercado Livre mostra. Pode fechar a janelinha e voltar: a
+     marca fica guardada. Clicou no botão errado? Clique nele de novo que a
+     marca sai.
+   - No fim, clique em **"Copiar conferência"** e cole o texto aqui na
+     conversa. Ele já vai com os números e com o trecho de onde cada um saiu —
+     não precisa anotar nada à mão.
    - No painel azul de cada anúncio, **passe o mouse sobre um número**:
      aparece a mesma origem.
    - Os números da extensão precisam ser **iguais** aos do Mercado Livre.
@@ -104,12 +111,15 @@ me diz:
 - O aviso verde apareceu? Com qual número?
 - O painel azul apareceu?
 - **Nos 3 anúncios que você conferiu, os números bateram com o Mercado Livre?**
-  Se algum não bateu, me mande o texto que aparece entre « » para ele (está
-  no ícone da extensão).
+  O "Copiar conferência" (passo 7) já me manda isso pronto.
 - Apareceu algum número que você sabe que está errado?
 - **Apareceu um aviso vermelho** quando você clicou no ícone da extensão? Se sim,
   me mande o "Copiar diagnóstico" dessa tela: o aviso quer dizer que a extensão
   travou ao ler alguma coisa, e o diagnóstico me diz o quê.
+- **Apareceu um aviso laranja**, dizendo que uma tela parou de trazer números?
+  Abra essa tela, espere carregar e me mande o "Copiar diagnóstico" dela. Esse
+  aviso quer dizer que o Mercado Livre pode ter mudado alguma coisa — e é
+  melhor eu saber por aí do que você ficar vendo número velho sem perceber.
 
 **Se nada aparecer, também me avisa** — é informação útil, não é problema.
 Nesse caso o print da tela de "Minhas publicações" me ajuda muito, porque é

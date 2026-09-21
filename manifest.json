@@ -2,7 +2,7 @@
   "manifest_version": 3,
 
   "name": "ML Metrics",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Mostra metricas de desempenho em anuncios do Mercado Livre.",
 
   "icons": {

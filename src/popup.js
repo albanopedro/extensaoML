@@ -31,12 +31,19 @@
   // erro nenhum, e aqui ele explica por que nada apareceu na tela.
   const CHAVE_ERRO = MLMetricsGravacao.CHAVES.ERRO;
 
+  // O que a vendedora marcou na conferencia, por anuncio, e as telas que
+  // entregavam numeros e pararam (as duas gravadas para sobreviver ao
+  // fechamento do popup).
+  const CHAVE_CONFERENCIA = MLMetricsGravacao.CHAVES.CONFERENCIA;
+  const CHAVE_TELAS_FALHANDO = MLMetricsGravacao.CHAVES.TELAS_FALHANDO;
+
   // Toda chave da extensao no storage comeca com este prefixo. O botao
   // "Limpar dados guardados" apaga pelo prefixo - ver la o porque.
   const PREFIXO_CHAVES = MLMetricsGravacao.PREFIXO_CHAVES;
 
   const resumo = document.getElementById("resumo");
   const erro = document.getElementById("erro");
+  const telas = document.getElementById("telas");
   const lista = document.getElementById("lista");
   const aviso = document.getElementById("aviso");
   const campoDiagnostico = document.getElementById("diagnostico");
@@ -60,8 +67,12 @@
 
   /**
    * Monta uma linha da lista de anuncios capturados.
+   *
+   * @param {string} codigo
+   * @param {Object} dados registro do cache
+   * @param {string|undefined} marca "bate" ou "nao" - o que ela ja marcou
    */
-  function criarItem(codigo, dados) {
+  function criarItem(codigo, dados, marca) {
     const item = document.createElement("div");
     item.className = "item";
 
@@ -112,7 +123,128 @@
     direita.textContent = partes.join(" · ") ||
       (semOrigem ? "sem origem (versão antiga)" : "sem dados");
 
+    // Conferencia: so faz sentido em anuncio com numero conferivel.
+    if (partes.length > 0) item.appendChild(criarConferencia(codigo, marca));
+
     return item;
+  }
+
+  /**
+   * Os dois botoes de conferencia de um anuncio.
+   *
+   * A conferencia e o passo que decide se a extensao pode ser usada para
+   * valer: os numeros dela precisam bater com os do Mercado Livre. Antes
+   * disso ser um botao, a pessoa tinha que anotar o resultado a mao e
+   * escrever numa conversa - trabalho que ninguem faz duas vezes. Aqui ela
+   * marca e o texto sai pronto (ver textoDaConferencia).
+   *
+   * Clicar de novo no mesmo botao desmarca: errar o clique nao pode virar
+   * um resultado errado do outro lado.
+   *
+   * @param {string} codigo
+   * @param {string|undefined} marca
+   * @returns {Element}
+   */
+  function criarConferencia(codigo, marca) {
+    const caixa = document.createElement("div");
+    caixa.className = "conferir";
+
+    [
+      { valor: "bate", texto: "✓ bate", classe: "bate-sim" },
+      { valor: "nao", texto: "✗ não bate", classe: "bate-nao" }
+    ].forEach(function (opcao) {
+      const botao = document.createElement("button");
+
+      botao.type = "button";
+      botao.textContent = opcao.texto;
+      botao.title = "Comparando com o que o Mercado Livre mostra para " + codigo;
+      if (marca === opcao.valor) botao.className = opcao.classe;
+
+      botao.addEventListener("click", function () {
+        marcarConferencia(codigo, marca === opcao.valor ? null : opcao.valor);
+      });
+
+      caixa.appendChild(botao);
+    });
+
+    return caixa;
+  }
+
+  /**
+   * Grava (ou apaga) a marca de conferencia de um anuncio e redesenha.
+   *
+   * @param {string} codigo
+   * @param {string|null} valor "bate", "nao" ou null para desmarcar
+   */
+  function marcarConferencia(codigo, valor) {
+    try {
+      chrome.storage.local.get([CHAVE_CONFERENCIA], function (guardado) {
+        if (chrome.runtime.lastError) return;
+
+        const conferencia = guardado[CHAVE_CONFERENCIA] || {};
+
+        if (valor === null) delete conferencia[codigo];
+        else conferencia[codigo] = { resultado: valor, quando: Date.now() };
+
+        chrome.storage.local.set({ [CHAVE_CONFERENCIA]: conferencia }, function () {
+          if (chrome.runtime.lastError) return;
+          desenhar();
+        });
+      });
+    } catch (e) {
+      // contexto invalidado: o popup inteiro e recarregado pelo navegador
+    }
+  }
+
+  /**
+   * Texto da conferencia, pronto para colar numa conversa.
+   *
+   * Leva os numeros E o trecho de onde cada um foi lido: quando algum nao
+   * bate, e o trecho que diz o que a extensao leu errado. Sem ele, "nao
+   * bateu" nao da para consertar.
+   *
+   * @param {Object} cache mlmetrics_dados
+   * @param {Object} conferencia mlmetrics_conferencia
+   * @returns {string}
+   */
+  function textoDaConferencia(cache, conferencia) {
+    const codigos = Object.keys(conferencia || {});
+    const linhas = [
+      "CONFERÊNCIA ML Metrics v" + chrome.runtime.getManifest().version +
+        " — " + new Date().toLocaleString("pt-BR"),
+      "Números da extensão, comparados com a tela do Mercado Livre."
+    ];
+
+    if (codigos.length === 0) {
+      linhas.push("");
+      linhas.push("Nenhum anúncio marcado ainda: no ícone da extensão, use");
+      linhas.push("\"✓ bate\" ou \"✗ não bate\" em cada anúncio conferido.");
+      return linhas.join("\n");
+    }
+
+    linhas.push(codigos.length + " anúncio(s) marcado(s) de " +
+      Object.keys(cache || {}).length + " guardado(s).");
+
+    codigos.forEach(function (codigo) {
+      const dados = (cache || {})[codigo] || {};
+      const origem = dados.origem || {};
+
+      linhas.push("");
+      linhas.push((conferencia[codigo].resultado === "bate" ? "BATEU" : "NÃO BATEU") +
+        " — " + codigo);
+
+      ["visitas", "vendas"].forEach(function (metrica) {
+        if (dados[metrica] === undefined || !origem[metrica]) return;
+
+        linhas.push("  " + metrica + ": " +
+          Number(dados[metrica]).toLocaleString("pt-BR") +
+          " · lido em " + origem[metrica].trecho +
+          " · " + (origem[metrica].tela || "?") +
+          " · " + formatarData(origem[metrica].em));
+      });
+    });
+
+    return linhas.join("\n");
   }
 
   /**
@@ -156,45 +288,84 @@
   }
 
   /**
+   * Mostra em laranja as telas que ENTREGAVAM números e pararam (o coletor
+   * marca em marcarTelaFalhando).
+   *
+   * E o aviso mais importante depois do erro: quando o Mercado Livre muda o
+   * layout, a extensao para de capturar em silencio e o painel continua
+   * mostrando a ultima leitura - numero velho com cara de novo. Aqui a
+   * pessoa ve que aquela tela parou, e o diagnostico dela conta o resto.
+   *
+   * @param {Object|undefined} falhando { "<tela mascarada>": { quando } }
+   */
+  function mostrarTelasFalhando(falhando) {
+    const nomes = Object.keys(falhando || {});
+
+    if (nomes.length === 0) {
+      telas.hidden = true;
+      return;
+    }
+
+    const desde = nomes.map(function (tela) {
+      return tela + " (desde " + formatarData(falhando[tela].quando) + ")";
+    }).join("; ");
+
+    telas.hidden = false;
+    telas.textContent =
+      "Uma tela que já trazia números parou de trazer: " + desde + ". " +
+      "O Mercado Livre pode ter mudado o layout. Abra essa tela, espere " +
+      "carregar e clique em \"Copiar diagnóstico\".";
+  }
+
+  /**
    * Le o storage e desenha o estado atual.
    */
   function desenhar() {
     try {
-      chrome.storage.local.get([CHAVE_CACHE, CHAVE_DIAGNOSTICO, CHAVE_ERRO], function (guardado) {
-        if (chrome.runtime.lastError) return;  // contexto invalidado
+      chrome.storage.local.get(
+        [CHAVE_CACHE, CHAVE_DIAGNOSTICO, CHAVE_ERRO, CHAVE_CONFERENCIA, CHAVE_TELAS_FALHANDO],
+        function (guardado) {
+          if (chrome.runtime.lastError) return;  // contexto invalidado
 
-        mostrarErro(guardado[CHAVE_ERRO]);
+          mostrarErro(guardado[CHAVE_ERRO]);
+          mostrarTelasFalhando(guardado[CHAVE_TELAS_FALHANDO]);
 
-        const cache = guardado[CHAVE_CACHE] || {};
-        const codigos = Object.keys(cache);
+          const conferencia = guardado[CHAVE_CONFERENCIA] || {};
+          const cache = guardado[CHAVE_CACHE] || {};
+          const codigos = Object.keys(cache);
 
-        lista.textContent = "";
+          lista.textContent = "";
 
-        if (codigos.length === 0) {
-          resumo.textContent =
-            "Nenhum anúncio capturado ainda. Abra \"Minhas publicações\" " +
-            "no Mercado Livre e espere a lista carregar por completo.";
-          return;
+          if (codigos.length === 0) {
+            resumo.textContent =
+              "Nenhum anúncio capturado ainda. Abra \"Minhas publicações\" " +
+              "no Mercado Livre e espere a lista carregar por completo.";
+            return;
+          }
+
+          // Registro sem nenhum rastro de origem veio de versao antiga: nao
+          // pode ser conferido e nao aparece no painel. Contamos a parte para
+          // a pessoa saber que "Limpar dados guardados" resolve.
+          const semOrigem = codigos.filter(function (codigo) {
+            const origem = cache[codigo].origem || {};
+            return !origem.visitas && !origem.vendas;
+          }).length;
+
+          const marcados = Object.keys(conferencia).length;
+
+          resumo.textContent = codigos.length + " anúncio(s) com dados guardados." +
+            (marcados > 0 ? " " + marcados + " conferido(s)." : "") +
+            (semOrigem > 0
+              ? " " + semOrigem + " sem origem (de versão antiga): use " +
+                "\"Limpar dados guardados\"."
+              : "");
+
+          codigos.forEach(function (codigo) {
+            const marca = conferencia[codigo] ? conferencia[codigo].resultado : undefined;
+            lista.appendChild(criarItem(codigo, cache[codigo], marca));
+          });
         }
-
-        // Registro sem nenhum rastro de origem veio de versao antiga: nao pode
-        // ser conferido e nao aparece no painel. Contamos a parte para a pessoa
-        // saber que "Limpar dados guardados" resolve.
-        const semOrigem = codigos.filter(function (codigo) {
-          const origem = cache[codigo].origem || {};
-          return !origem.visitas && !origem.vendas;
-        }).length;
-
-        resumo.textContent = codigos.length + " anúncio(s) com dados guardados." +
-          (semOrigem > 0
-            ? " " + semOrigem + " sem origem (de versão antiga): use " +
-              "\"Limpar dados guardados\"."
-            : "");
-
-        codigos.forEach(function (codigo) {
-          lista.appendChild(criarItem(codigo, cache[codigo]));
-        });
-      });
+      );
     } catch (e) {
       // contexto invalidado: popup inteiro e recarregado pelo navegador
     }
@@ -342,6 +513,45 @@
     }
   });
 
+  /**
+   * Entrega um texto para a pessoa copiar: clipboard E na tela.
+   *
+   * O texto fica SEMPRE no campo, selecionado. A copia automatica e um
+   * atalho; ja aconteceu de o clipboard estar bloqueado e o "Ctrl+V" nao
+   * trazer nada, sem ninguem entender por que. Sem depender dele, a pessoa
+   * copia na mao (Ctrl+C) ou simplesmente le o que esta escrito.
+   *
+   * @param {string} texto
+   */
+  function entregarTexto(texto) {
+    navigator.clipboard.writeText(texto).then(function () {
+      avisar("Copiado. Cole aqui na conversa.");
+    }).catch(function () {
+      avisar("Clipboard bloqueado: selecione o texto abaixo e use Ctrl+C.");
+    });
+
+    campoDiagnostico.hidden = false;
+    campoDiagnostico.value = texto;
+    campoDiagnostico.select();
+  }
+
+  document.getElementById("conferencia").addEventListener("click", function () {
+    // So o que esta guardado: a conferencia e sobre os numeros que a
+    // extensao ja tinha quando a pessoa olhou a tela do Mercado Livre.
+    try {
+      chrome.storage.local.get([CHAVE_CACHE, CHAVE_CONFERENCIA], function (guardado) {
+        if (chrome.runtime.lastError) return;
+
+        entregarTexto(textoDaConferencia(
+          guardado[CHAVE_CACHE] || {},
+          guardado[CHAVE_CONFERENCIA] || {}
+        ));
+      });
+    } catch (e) {
+      // contexto invalidado: popup inteiro e recarregado pelo navegador
+    }
+  });
+
   document.getElementById("copiar").addEventListener("click", function () {
     // Primeiro a tela aberta AGORA (pedirDiagnosticoDaAba), depois o que
     // esta guardado. As duas partes vao juntas no mesmo relatorio.
@@ -383,23 +593,16 @@
             capturado: guardado[CHAVE_CACHE] || {},
             // Se o historico diario esta sendo gravado - so o resumo.
             historico: resumirHistorico(guardado),
+            // O que a vendedora marcou na conferencia, e as telas que
+            // entregavam numeros e pararam de entregar.
+            conferencia: guardado[CHAVE_CONFERENCIA] || {},
+            telasFalhando: guardado[CHAVE_TELAS_FALHANDO] || {},
             // O ultimo diagnostico gravado sozinho, de qualquer aba. Pode ser
             // de outra tela - por isso a telaAtual vem antes.
             ultimoDiagnosticoGuardado: guardado[CHAVE_DIAGNOSTICO] || null
           }, null, 2);
 
-          navigator.clipboard.writeText(relatorio).then(function () {
-            avisar("Copiado. Cole aqui na conversa.");
-          }).catch(function () {
-            avisar("Clipboard bloqueado: selecione o texto abaixo e use Ctrl+C.");
-          });
-
-          // O texto fica SEMPRE na tela, selecionado. A copia automatica e
-          // um atalho; se o navegador nao deixar, a pessoa copia na mao ou
-          // le o que esta escrito - sem depender do clipboard para nada.
-          campoDiagnostico.hidden = false;
-          campoDiagnostico.value = relatorio;
-          campoDiagnostico.select();
+          entregarTexto(relatorio);
         }
       );
     } catch (e) {

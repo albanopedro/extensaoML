@@ -39,6 +39,17 @@
   const CHAVE_ORIGENS = MLMetricsGravacao.CHAVES.ORIGENS;
   const CHAVE_ULTIMA_BUSCA = MLMetricsGravacao.CHAVES.ULTIMA_BUSCA;
 
+  // Telas que entregavam numeros e pararam (ver marcarTelaFalhando).
+  const CHAVE_TELAS_FALHANDO = MLMetricsGravacao.CHAVES.TELAS_FALHANDO;
+
+  // O que ja aconteceu NESTE carregamento da pagina: null (ainda nada),
+  // "marcada" (varredura sem captura numa tela conhecida) ou "entregou"
+  // (capturou). Existe para o aviso ser gravado no maximo uma vez por
+  // carregamento - o observer varre a cada mutacao do DOM - e para uma
+  // varredura vazia DEPOIS de uma captura (a lista se remontando, por
+  // exemplo) nao acusar falha numa tela que acabou de funcionar.
+  let estadoDaTela = null;
+
   // Busca automatica das telas de vendedor (ver atualizarEmSegundoPlano):
   // DESLIGADA. As telas de vendedor do ML sao montadas por JavaScript, e o
   // HTML buscado pelo service worker muito provavelmente chega sem os
@@ -312,9 +323,11 @@
       const achados = MLMetricsLeitura.varrerPagina(document, window.location.href);
 
       // Nada capturado numa tela onde deveria haver algo. Em vez de apenas
-      // desistir em silencio, registramos o que estava escrito na pagina.
+      // desistir em silencio, registramos o que estava escrito na pagina - e,
+      // se esta tela ja entregou numeros antes, avisamos que ela parou.
       if (Object.keys(achados).length === 0) {
         salvarDiagnostico();
+        marcarTelaFalhando();
         return;
       }
 
@@ -322,8 +335,93 @@
 
       // Deu certo aqui: guardamos o endereco para poder voltar sozinhos depois.
       lembrarOrigem(window.location.href);
+
+      // E, se esta tela estava marcada como falhando, o aviso sai: ela voltou.
+      limparTelaFalhando();
     } catch (e) {
       registrarErro("coletar", e);
+    }
+  }
+
+  /**
+   * Marca a tela atual como "ja entregou numeros e agora nao entrega".
+   *
+   * O Mercado Livre muda de layout sem avisar ninguem. Quando isso acontece,
+   * a extensao simplesmente para de capturar: o painel segue mostrando os
+   * numeros da ultima leitura, que continuam PARECENDO certos, e a falha so
+   * aparece quando alguem desconfia da data. Aqui ela vira um aviso no popup.
+   *
+   * So vale para tela que JA funcionou (esta em CHAVE_ORIGENS). Qualquer
+   * outra pagina do ML nunca entregou numero e nao deve acusar nada.
+   *
+   * Guardamos o caminho MASCARADO, a mesma forma que o diagnostico usa: diz
+   * qual tela e sem levar codigo de anuncio nem id de vendedor junto.
+   */
+  function marcarTelaFalhando() {
+    if (estadoDaTela !== null) return;
+    estadoDaTela = "marcada";
+
+    try {
+      chrome.storage.local.get([CHAVE_ORIGENS, CHAVE_TELAS_FALHANDO], function (guardado) {
+        if (chrome.runtime.lastError) return;
+
+        try {
+          const origens = guardado[CHAVE_ORIGENS] || [];
+          if (!MLMetricsLeitura.ehOrigemConhecida(window.location.href, origens)) return;
+
+          const tela = MLMetricsLeitura.caminhoMascarado(window.location.pathname);
+          const falhando = guardado[CHAVE_TELAS_FALHANDO] || {};
+
+          // Ja avisado: manter a hora da PRIMEIRA falha diz ha quanto tempo
+          // a tela parou, que e a informacao util.
+          if (falhando[tela]) return;
+
+          falhando[tela] = {
+            quando: Date.now(),
+            versao: chrome.runtime.getManifest().version
+          };
+
+          chrome.storage.local.set({ [CHAVE_TELAS_FALHANDO]: falhando }, function () {
+            if (chrome.runtime.lastError) return;
+          });
+        } catch (e) {
+          // contexto invalidado dentro do callback: o aviso nao e essencial
+        }
+      });
+    } catch (e) {
+      // contexto invalidado antes mesmo do callback
+    }
+  }
+
+  /**
+   * Tira a tela atual da lista de telas falhando - ela acabou de entregar
+   * numeros de novo. Sem isto, o aviso do popup ficaria para sempre.
+   */
+  function limparTelaFalhando() {
+    if (estadoDaTela === "entregou") return;
+    estadoDaTela = "entregou";
+
+    try {
+      chrome.storage.local.get([CHAVE_TELAS_FALHANDO], function (guardado) {
+        if (chrome.runtime.lastError) return;
+
+        try {
+          const falhando = guardado[CHAVE_TELAS_FALHANDO] || {};
+          const tela = MLMetricsLeitura.caminhoMascarado(window.location.pathname);
+
+          if (!falhando[tela]) return;  // nao estava marcada: nada a gravar
+
+          delete falhando[tela];
+
+          chrome.storage.local.set({ [CHAVE_TELAS_FALHANDO]: falhando }, function () {
+            if (chrome.runtime.lastError) return;
+          });
+        } catch (e) {
+          // contexto invalidado dentro do callback
+        }
+      });
+    } catch (e) {
+      // contexto invalidado antes mesmo do callback
     }
   }
 

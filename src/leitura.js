@@ -959,6 +959,29 @@ var MLMetricsLeitura = (function () {
   // --------------------------------------------------------------------------
 
   /**
+   * Diz se esta tela JA entregou numeros alguma vez (esta na lista de
+   * origens aprendidas).
+   *
+   * Serve para separar "tela que nunca deu nada" de "tela que dava e parou".
+   * A primeira e a maioria das paginas do ML e nao significa nada; a segunda
+   * e sinal de que o site mudou (ver marcarTelaFalhando no coletor.js).
+   *
+   * Compara sem a query, do mesmo jeito que as origens sao guardadas: os
+   * filtros e a paginacao da tela mudam a query o tempo todo.
+   *
+   * @param {string} url endereco da pagina
+   * @param {string[]|undefined} origens telas que ja entregaram numeros
+   * @returns {boolean}
+   */
+  function ehOrigemConhecida(url, origens) {
+    const limpa = String(url).split("?")[0];
+
+    return (origens || []).some(function (origem) {
+      return origem === limpa;
+    });
+  }
+
+  /**
    * Diz se estamos numa pagina de compra - a vitrine publica do produto.
    *
    * O coletor NAO deve agir aqui, e a razao vale a pena entender.
@@ -1079,6 +1102,7 @@ var MLMetricsLeitura = (function () {
     anotarImplausiveis: anotarImplausiveis,
     contextoDoTexto: contextoDoTexto,
     ehPaginaDeCompra: ehPaginaDeCompra,
+    ehOrigemConhecida: ehOrigemConhecida,
     caminhoMascarado: caminhoMascarado
   };
 })();

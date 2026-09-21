@@ -44,6 +44,18 @@
       color: #8a1c13;
     }
 
+    /* Tela que entregava numeros e parou: laranja, entre o erro (vermelho)
+       e o resumo (cinza). Nao e falha da extensao nem estado normal. */
+    #telas {
+      background: #fff4e5;
+      border: 1px solid #ffd8a8;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      line-height: 1.5;
+      color: #8a5300;
+    }
+
     #resumo {
       background: #f5f5f5;
       border-radius: 6px;
@@ -82,6 +94,30 @@
       line-height: 1.35;
       word-break: break-word;
     }
+
+    /* Conferencia: dois botoes pequenos por anuncio ("bate" / "nao bate").
+       Ficam lado a lado, na linha de baixo do anuncio, e o escolhido fica
+       colorido - a marca precisa ser visivel de relance quando ela reabrir
+       o popup depois de olhar a tela do Mercado Livre. */
+    .item .conferir {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .item .conferir button {
+      width: auto;
+      flex: 1;
+      padding: 4px 6px;
+      margin: 0;
+      font-size: 11px;
+      background: #f5f5f5;
+      color: #555;
+      border: 1px solid #ddd;
+    }
+
+    .item .conferir button.bate-sim { background: #e6f7ed; color: #00733f; border-color: #00a650; }
+    .item .conferir button.bate-nao { background: #fdecea; color: #a5160c; border-color: #d93025; }
 
     button {
       width: 100%;
@@ -130,10 +166,13 @@
 
 <div id="erro" hidden=""></div>
 
+<div id="telas" hidden=""></div>
+
 <div id="resumo">Carregando...</div>
 
 <div id="lista"></div>
 
+<button id="conferencia" class="principal">Copiar conferência</button>
 <button id="copiar" class="secundario">Copiar diagnóstico</button>
 <button id="limpar" class="perigo">Limpar dados guardados</button>
 

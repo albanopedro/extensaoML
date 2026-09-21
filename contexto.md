@@ -3,7 +3,7 @@
 > Cole este arquivo inteiro no início de uma nova conversa. Ele contém tudo que é
 > preciso saber para continuarmos corrigindo os problemas sem refazer a análise.
 >
-> **Atualizado em 18/09/2026, depois do lote 26b (chaves do storage num lugar só).** O que falta fazer está
+> **Atualizado em 21/09/2026, depois do lote 27 (conferência num clique e aviso de tela que parou).** O que falta fazer está
 > na **seção 5**. O que já foi feito está resumido e sinalizado na **seção 6**.
 
 ---
@@ -42,7 +42,7 @@ envolvido → propõe a correção → aplicamos.**
 - **Sem acentos nos comentários de código** (o projeto segue isso). Em texto de
   interface exibido para a usuária, acentos normais.
 - **Antes de corrigir, confirme a linha.** Os números de linha da seção 5 valem para o
-  estado do código em **18/09/2026, depois do lote 26b**. Depois de cada correção eles
+  estado do código em **21/09/2026, depois do lote 27**. Depois de cada correção eles
   saem do lugar.
 - **Toda correção entra com caso de teste**: no harness (`node teste/test-parsing.js`)
   quando a função for testável fora do navegador; na página de teste
@@ -63,7 +63,7 @@ envolvido → propõe a correção → aplicamos.**
 (visitas, vendas, conversão, receita estimada) nos anúncios do Mercado Livre de uma
 vendedora.
 
-Caminho: `C:\codes\extensaoML` · versão no manifest: **0.2.1**
+Caminho: `C:\codes\extensaoML` · versão no manifest: **0.2.2**
 
 **Restrição central do projeto:** a API pública do Mercado Livre devolve 403 e
 exigiria OAuth ou cookie de sessão. Por isso a extensão **raspa a tela** em vez de
@@ -132,6 +132,8 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
 | `mlmetrics_diagnostico` | `{ host, caminho (mascarado), quando, amostras, periodo }` — gravado quando a captura falha |
 | `mlmetrics_origens` | até 3 URLs (sem query) de telas de vendedor que já entregaram números |
 | `mlmetrics_erro` | `{ onde, mensagem, pilha, host, tela (mascarada), quando, versao }` — último erro inesperado da leitura (lote 24). Aparece em vermelho no popup e no relatório |
+| `mlmetrics_conferencia` | `{ MLB123: { resultado: "bate"\|"nao", quando } }` — o que a vendedora marcou na conferência (lote 27). Gravado porque o popup fecha a cada clique fora dele |
+| `mlmetrics_telas_falhando` | `{ "<tela mascarada>": { quando, versao } }` — telas que **já entregaram** números e pararam (lote 27). Vira o aviso laranja do popup |
 | `mlmetrics_historico_<código>` | uma chave **por anúncio** (lote 26): `{ "AAAA-MM-DD": { visitas, vendas, origem: {…} } }` — um registro por dia no formato do cache, com o rastro de cada número; 400 dias. Ainda não é exibido. O manifest pede `unlimitedStorage` para o histórico nunca tirar espaço do cache. |
 | `mlmetrics_ultima_busca` | timestamp da última busca automática (trava de 2 h). Com a busca desligada, a chave não é mais criada. |
 
@@ -169,6 +171,11 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
    Falha no histórico nunca desfaz o cache. Depois mostra o toast verde e lembra
    o endereço da tela (nunca URL de anúncio isolado). Sem captura → `salvarDiagnostico` (trava de 3 min **por tela**).
    Se a extensão for recarregada, o script vira órfão e se desliga (`extensaoViva`).
+   **Tela conhecida que parou de entregar** (lote 27): varredura sem captura numa tela
+   que está em `mlmetrics_origens` marca `mlmetrics_telas_falhando`
+   (`marcarTelaFalhando`); captura na mesma tela tira a marca (`limparTelaFalhando`).
+   No máximo uma gravação por carregamento de página, e uma varredura vazia **depois**
+   de uma captura não acusa nada (`estadoDaTela`).
    **Exceção inesperada na leitura não é mais silenciosa** (lote 24): `coletar()` inteiro
    fica em `try/catch` e `registrarErro` grava `mlmetrics_erro` (função, mensagem, 3
    linhas de pilha, tela mascarada, versão), com trava de 1 min para a mesma mensagem.
@@ -194,6 +201,12 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
 4. **Popup** (com a versão ao lado do nome):
    - **Aviso vermelho no topo** quando existe `mlmetrics_erro`: diz que a extensão
      falhou ao ler uma tela, quando foi, e manda copiar o diagnóstico (lote 24).
+   - **Aviso laranja** quando existe `mlmetrics_telas_falhando`: uma tela que já trazia
+     números parou de trazer, desde quando, e o que fazer (lote 27).
+   - **Conferência** (lote 27): cada anúncio com número conferível ganha "✓ bate" e
+     "✗ não bate"; a marca vai para `mlmetrics_conferencia` (sobrevive ao popup fechar)
+     e clicar de novo desmarca. **"Copiar conferência"** monta o texto pronto, com o
+     resultado e o trecho « » de cada número.
    - "Limpar dados guardados" apaga todas as chaves `mlmetrics_`.
    - A lista mostra, embaixo de cada número, o rastro (trecho « », tela, hora).
      Registro sem rastro aparece como "sem origem (versão antiga)".
@@ -206,7 +219,8 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
      aperte F5"),
      `ultimoErro`, `origens` mascaradas (pela regra do `leitura.js`, que o popup carrega
      desde o lote 26), `capturado`, `historico` (só o resumo: anúncios, registros,
-     primeiro e último dia) e `ultimoDiagnosticoGuardado`. O
+     primeiro e último dia), `conferencia`, `telasFalhando` e
+     `ultimoDiagnosticoGuardado`. O
      texto aparece sempre num `<textarea>`, além do clipboard.
 5. **Envio para a cliente:** `powershell -ExecutionPolicy Bypass -File .\empacotar.ps1`
    → `dist\ML-Metrics-<versão>.zip`. Nunca zipar a pasta de trabalho.
@@ -229,10 +243,11 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
 | Pedido do Pedro (17/09) — lote 25 | ✅ **`coletor.js` dividido** (2.015 → 696 linhas): a leitura foi para `leitura.js` e a montagem do diagnóstico para `diagnostico.js`; as contas e formatos do painel saíram do `content.js` para `calculo.js`. O harness **não recorta mais função do texto-fonte**: carrega os arquivos como são. Nenhum comportamento mudou. Junto, os quatro `var` da 0.1.7 viraram `const`/`let`. |
 | Pedido do Pedro (18/09) — lote 26 | ✅ **histórico diário gravado** (ainda sem exibir): cada leitura entra num registro por dia e por anúncio, com rastro, para no futuro dar vendas/mês e faturamento/mês. `unlimitedStorage` no manifest. E o popup passou a usar a regra de mascarar do `leitura.js` em vez de uma cópia. |
 | Pedido do Pedro (18/09) — lote 26b | ✅ **chaves do storage num lugar só**: `"mlmetrics_dados"` e as outras estavam escritas à mão em 5 arquivos; agora só no `gravacao.js`, e o harness recusa nome escrito à mão. Nenhum comportamento mudou. |
+| Pedido do Pedro (21/09) — lote 27 | ✅ **conferência num clique** (marca "bate"/"não bate" por anúncio, gravada, e "Copiar conferência" com o texto pronto) e **aviso de tela que parou de entregar números** (laranja no popup, quando uma tela que já funcionou deixa de entregar). |
 | Revisão 1 — resíduo #21 | ✅ corrida entre abas resolvida no lote 22 (gravação única no service worker). |
-| Harness | **267/267 PASS** (+6 no lote 26b: nomes das chaves presos, prefixo comum, `CHAVES` congelado e nenhum nome escrito à mão fora do `gravacao.js`). `node --check` ok em todos os JS. |
-| Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **49/49 PASS** (+7 no lote 26: histórico gravado pela aba, e o popup de verdade aberto com `chrome` falso — lista, origem mascarada pelo `leitura.js`, resumo do histórico sem os números de cada dia). Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
-| Pacote | `dist\ML-Metrics-0.2.1.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
+| Harness | **271/271 PASS** (+4 no lote 27: `ehOrigemConhecida` — tela que já entregou números, ignorando a query). `node --check` ok em todos os JS. |
+| Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **57/57 PASS** (+8 no lote 27: aviso laranja no popup; marcar, copiar e desmarcar a conferência; tela conhecida que parou vira aviso; tela desconhecida não; tela que voltou a entregar sai do aviso). Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
+| Pacote | `dist\ML-Metrics-0.2.2.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
 
 ### ⚠️ Repositório público — decisão do Pedro
 
@@ -249,7 +264,7 @@ git/GitHub — é ação do Pedro.
 O harness e o teste no navegador (`teste/rodar-no-navegador.html`) cobrem os itens 1, 3,
 5, 6 e 7 com `chrome` falso, e o item 8 no Node; falta confirmar com a extensão de
 verdade (mensagens popup ↔ aba ↔ service worker e storage reais). Com a extensão
-carregada (0.2.1):
+carregada (0.2.2):
 
 1. **#44** — numa aba do ML, ícone → "Copiar diagnóstico": o relatório tem `telaAtual`
    com `host`, `caminho` mascarado, `vitrine`, `mencionaVisita`, `capturariaAgora`,
@@ -273,18 +288,21 @@ carregada (0.2.1):
    trecho de cada um.
 8. **#21** — com duas telas de vendedor abertas em abas diferentes (F5 nas duas), o
    popup lista os anúncios das duas; nenhuma apaga o que a outra gravou.
-9. **Popup** — o título mostra "ML Metrics v0.2.1".
+9. **Popup** — o título mostra "ML Metrics v0.2.2".
 10. **Histórico (lote 26)** — depois de capturar numa tela de vendedor, "Copiar
     diagnóstico": `historico.anuncios` > 0 e `historico.ultimoDia` = hoje. Em
     `edge://extensions` → Detalhes da ML Metrics, a extensão aceita a permissão nova
     (`unlimitedStorage` não mostra aviso). "Limpar dados guardados" zera o
     `historico`.
+11. **Conferência (lote 27)** — no popup, marcar "✓ bate" num anúncio, **fechar** o
+    popup e reabrir: a marca continua lá. "Copiar conferência" traz o resultado e o
+    trecho « ». Clicar de novo no mesmo botão desmarca.
 
 ### Ação pendente (depois da verificação)
 
-1. Rodar `empacotar.ps1` e enviar `dist\ML-Metrics-0.2.1.zip` à cliente.
+1. Rodar `empacotar.ps1` e enviar `dist\ML-Metrics-0.2.2.zip` à cliente.
 2. A cliente segue **"Depois de uma atualização"** do guia: substituir os arquivos na
-   mesma pasta, recarregar a extensão, conferir a versão **0.2.1** (também no popup),
+   mesma pasta, recarregar a extensão, conferir a versão **0.2.2** (também no popup),
    **F5** nas abas do ML.
 3. A cliente clica **"Limpar dados guardados"** (agora apaga também as origens
    envenenadas pelo build antigo).
@@ -293,8 +311,9 @@ carregada (0.2.1):
    `telaAtual.resumoDasRecusas` e `telaAtual.recusas` dizem o motivo exato. O
    `telaAtual.periodo` decide o #47 (período), e o mesmo `telaAtual` valida #38, #48 e
    #57 na tela real.
-5. A cliente faz a **conferência de 3 anúncios** (passo 7 do guia): número do ML ×
-   número da extensão, com o trecho « » de cada um.
+5. A cliente faz a **conferência de 3 anúncios** (passo 7 do guia): no popup, marca
+   **"✓ bate"** ou **"✗ não bate"** em cada um e clica em **"Copiar conferência"** —
+   o texto já sai com os números e o trecho « » de cada um (lote 27).
 
 ### Teste na conta do Pedro (não feito)
 
@@ -327,7 +346,7 @@ de vendedor (nunca vista — ver "Maior risco aberto" na seção 4):
 | # | Sev. | Título | Status | Depende da tela real? | Lote |
 |---|---|---|---|---|---|
 | #47 | MÉDIO | Período (7/30 dias) não é registrado junto do rastro (observer resolvido no lote 21; o período já vem no diagnóstico desde o lote 23a) | ⚠️ parcial | Sim (período) | 23b |
-| — | — | **Exibir vendas/mês e faturamento/mês** a partir do histórico diário (a gravação já existe desde o lote 26) | ⬜ | Sim — conferência dos 3 anúncios **e** #47 | 27 |
+| — | — | **Exibir vendas/mês e faturamento/mês** a partir do histórico diário (a gravação já existe desde o lote 26) | ⬜ | Sim — conferência dos 3 anúncios **e** #47 | 28 |
 | — | — | Decisão: religar a busca automática? | ⬜ | Sim (o HTML buscado traz os números?) | — |
 
 Nenhuma das três tem como avançar sem o `telaAtual.periodo`/`telaAtual` de uma tela de
@@ -349,7 +368,7 @@ código**: são decisões e ações do Pedro fora do repositório/extensão em s
 | # | Sev. | Título | Status | Quem resolve |
 |---|---|---|---|---|
 | #50 | MÉDIO | Privacidade no repositório GitHub (resíduo: repo público + histórico) | ⚠️ parcial | Pedro (GitHub) |
-| — | — | Commit do lote 26b, verificação manual (10 itens), envio da 0.2.1 à cliente | ⬜ | Pedro |
+| — | — | Commit do lote 27, verificação manual (11 itens), envio da 0.2.2 à cliente | ⬜ | Pedro |
 
 ---
 
@@ -558,6 +577,21 @@ Pedido do Pedro ("arroche"). **Nenhum comportamento mudou.**
 | Ordem | `content.js` passou a usar o `gravacao.js` — já é o primeiro do manifest; a `conferirOrdem` do harness confere. O teste no navegador carrega o `gravacao.js` também nos cenários só do painel. |
 | Testes | Harness +6 → **267/267**: valores presos (renomear uma chave faria a versão nova não achar o que a antiga gravou), todos com o prefixo do "Limpar", `CHAVES` congelado, e **nenhum arquivo de `src/` além do `gravacao.js` com `"mlmetrics_` escrito à mão**. Navegador **49/49**. `manifest.json` → **0.2.1**. |
 
+### Lote 27 — conferência num clique e aviso de tela que parou (21/09/2026)
+
+Pedido do Pedro, depois de eu apontar que os dois atacam o mesmo problema: descobrir
+cedo quando alguma coisa não está batendo. A conferência é o passo que destrava o
+projeto, e ela dependia de a cliente anotar números à mão.
+
+| Item | O que foi feito |
+|---|---|
+| Conferência no popup | Cada anúncio com número conferível ganha **"✓ bate"** e **"✗ não bate"**. A marca vai para `mlmetrics_conferencia` — gravada porque o popup **fecha** a cada clique fora dele, e ela precisa sobreviver à ida até a tela do ML. Clicar de novo no mesmo botão desmarca (erro de clique não pode virar resultado errado). O resumo mostra quantos foram conferidos. |
+| "Copiar conferência" | Botão principal do popup: monta o texto pronto para colar na conversa, com "BATEU"/"NÃO BATEU" por anúncio, os números e **o trecho « » de cada um** — sem o trecho, "não bateu" não dá para consertar. Usa o mesmo `entregarTexto` do diagnóstico (clipboard + textarea, extraído da duplicação). |
+| Tela que parou de entregar | `marcarTelaFalhando` / `limparTelaFalhando` no `coletor.js` + `ehOrigemConhecida` no `leitura.js`. Varredura sem captura numa tela **que já entregou números** grava `mlmetrics_telas_falhando`; a primeira hora é mantida (diz há quanto tempo parou); captura na mesma tela tira a marca. `estadoDaTela` garante uma gravação por carregamento e impede falso alarme depois de uma captura. |
+| Por que isso importa | Quando o ML muda o layout, a extensão para de capturar **em silêncio** e o painel segue mostrando a última leitura — número velho com cara de novo. Agora vira aviso laranja no popup, e o guia diz o que fazer. |
+| Guia da cliente | Passo 7 reescrito para os botões e o "Copiar conferência"; "O que me contar" ganhou o aviso laranja. |
+| Testes | Harness +4 → **271/271** (`ehOrigemConhecida`: mesma URL, query ignorada, outra tela, sem origens). Navegador +8 → **57/57** (aviso laranja; marcar, copiar e desmarcar; tela conhecida que parou; tela desconhecida que não acusa; tela que voltou e saiu do aviso). `manifest.json` → **0.2.2**. |
+
 ---
 
 ## 7. Leitura de conjunto (o diagnóstico de fundo)
@@ -634,9 +668,10 @@ tela real disser o que o número significa (#47), o histórico já estará lá, 
 | — | 0.1.7 — robustez (Pedro) | — | ✅ | Feito em 15/09, testado no lote 24. |
 | — | 24 — Erro visível + dívida da 0.1.7 | — | ✅ | Feito em 17/09. |
 | — | 25 — `coletor.js` dividido + harness sem extrator | — | ✅ | Feito em 17/09. |
-| — | 26 — Histórico diário gravado + popup sem cópia de regra | — | ✅ | Feito em 18/09. Exibir fica para o lote 27. |
+| — | 26 — Histórico diário gravado + popup sem cópia de regra | — | ✅ | Feito em 18/09. Exibir fica para o lote 28. |
 | — | 26b — Chaves do storage num lugar só | — | ✅ | Feito em 18/09. |
-| 1 | **Commit + verificação manual + decisão do repositório** | #21, #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.2.1 para a cliente. |
+| — | 27 — Conferência num clique + aviso de tela que parou | — | ✅ | Feito em 21/09. |
+| 1 | **Commit + verificação manual + decisão do repositório** | #21, #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.2.2 para a cliente. |
 | 2 | **★ Ação — capturar "Minhas publicações" real + conferência de 3 anúncios** | — | ⬜ | "Copiar diagnóstico" na tela (`telaAtual`, com `resumoDasRecusas`) e passo 7 do guia. Decide #47 e valida #38, #48 e #57. |
 | 3 | **23b — Período no rastro** | #47 | ⬜ | Com o `telaAtual.periodo` da tela real, registrar o recorte (7/30 dias) junto do rastro. |
 | 4 | **Decisão — religar a busca automática?** | — | ⬜ | Só se a tela real mostrar que o HTML buscado traz os números. |
@@ -705,6 +740,7 @@ paramos.
 | 25 — `coletor.js` dividido | ✅ feito | 17/09/2026 | Pedido do Pedro (itens 2 e 3 das melhorias). `leitura.js` (`MLMetricsLeitura`), `diagnostico.js` (`MLMetricsDiagnostico`) e `calculo.js` (`MLMetricsCalculo`) saíram de `coletor.js` (2.015 → 696) e `content.js` (747 → 435), com o texto exato de cada função movido por script e as chamadas entre arquivos prefixadas. `diagnosticarTelaAtual()` → `diagnosticarTela(doc, local)`. Manifest na ordem de dependência. Harness sem extrator (`carregarModulo`), +6 casos da ordem do manifest → **237/237**; navegador **42/42**. Os quatro `var` da 0.1.7 → `const`/`let`. `manifest.json` → **0.1.9**, zip gerado. |
 | 26 — Histórico diário | ✅ feito | 18/09/2026 | Pedido do Pedro ("gravar agora, sem mostrar" + popup sem cópia). `registrarDia`/`diaDe`/`chaveDoHistorico` no `gravacao.js`; `gravarHistorico` no SW e `gravarHistoricoNestaAba` no plano B, na mesma fila e depois do cache; chave `mlmetrics_historico_<código>`, 400 dias, só métrica lida e com rastro. `unlimitedStorage`. Popup carrega `leitura.js`/`gravacao.js` (sem cópia do `caminhoMascarado`) e resume o histórico no relatório. Guia atualizado. Harness **261/261**, navegador **49/49**. `manifest.json` → **0.2.0**, zip gerado. |
 | 26b — Chaves num lugar só | ✅ feito | 18/09/2026 | Pedido do Pedro ("arroche"). `PREFIXO_CHAVES` e `CHAVES` (congelado) no `gravacao.js`; `background.js`, `coletor.js`, `content.js` e `popup.js` usam dali (eram 12 declarações escritas à mão). Harness +6 → **267/267** (valores presos, prefixo, congelado, nenhum literal fora do `gravacao.js`); navegador **49/49** (painel carrega `gravacao.js`). `manifest.json` → **0.2.1**, zip gerado. |
-| 27 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
-| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.1: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
+| 27 — Conferência e aviso de tela | ✅ feito | 21/09/2026 | Pedido do Pedro. Popup: "✓ bate"/"✗ não bate" por anúncio (gravado em `mlmetrics_conferencia`, sobrevive ao popup fechar, clique repetido desmarca) e "Copiar conferência" com números + trecho « ». Coletor: `marcarTelaFalhando`/`limparTelaFalhando` + `ehOrigemConhecida` → aviso laranja quando uma tela que já entregou números para de entregar. Guia: passo 7 e "O que me contar". Harness **271/271**, navegador **57/57**. `manifest.json` → **0.2.2**, zip gerado. |
+| 28 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
+| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.2: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |
