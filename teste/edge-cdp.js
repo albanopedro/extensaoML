@@ -135,11 +135,28 @@ class Navegador {
     this.proximoId = 1;
     this.pendentes = new Map();
 
+    // Contextos de JavaScript de cada aba. Interessa o MUNDO ISOLADO da
+    // extensao: os content scripts nao rodam no mesmo mundo da pagina, entao
+    // so por ele da para chamar as funcoes da extensao de dentro de uma aba.
+    this.contextos = [];
+
     socket.addEventListener("message", (evento) => {
       const mensagem = JSON.parse(evento.data);
-      const espera = this.pendentes.get(mensagem.id);
 
-      if (!espera) return;  // evento do protocolo, nao resposta: ignoramos
+      if (!mensagem.id) {
+        if (mensagem.method === "Runtime.executionContextCreated") {
+          this.contextos.push({
+            sessao: mensagem.sessionId,
+            id: mensagem.params.context.id,
+            nome: mensagem.params.context.name,
+            origem: mensagem.params.context.origin
+          });
+        }
+        return;  // demais eventos do protocolonao interessam aqui
+      }
+
+      const espera = this.pendentes.get(mensagem.id);
+      if (!espera) return;
       this.pendentes.delete(mensagem.id);
 
       if (mensagem.error) espera.rejeitar(new Error(mensagem.error.message));
@@ -238,6 +255,40 @@ class Navegador {
   /**
    * Abre uma aba no endereco dado e espera a pagina carregar.
    */
+  /**
+   * Roda JavaScript DENTRO do mundo isolado da extensao numa aba.
+   *
+   * E a unica forma de chamar, de fora, as funcoes que a extensao usa na
+   * pagina (MLMetricsLeitura e companhia): elas nao existem no mundo da
+   * pagina, de proposito.
+   *
+   * @param {Object} aba
+   * @param {string} nomeDoMundo nome da extensao, como o navegador o mostra
+   * @param {string} codigo
+   */
+  async rodarNaExtensao(aba, nomeDoMundo, codigo) {
+    const mundo = this.contextos.filter((contexto) => {
+      return contexto.sessao === aba.sessao && contexto.nome.indexOf(nomeDoMundo) !== -1;
+    }).pop();
+
+    if (!mundo) throw new Error("nao achei o mundo isolado da extensao nesta aba");
+
+    const resultado = await this.enviar("Runtime.evaluate", {
+      expression: "(async () => { " + codigo + " })()",
+      awaitPromise: true,
+      returnByValue: true,
+      contextId: mundo.id
+    }, aba.sessao);
+
+    if (resultado.exceptionDetails) {
+      const erro = resultado.exceptionDetails;
+      throw new Error("erro dentro da extensao: " +
+        ((erro.exception && erro.exception.description) || erro.text));
+    }
+
+    return resultado.result.value;
+  }
+
   async abrirAba(url) {
     const { targetId } = await this.enviar("Target.createTarget", { url: url });
     const sessao = await this.sessaoDe({ id: targetId });

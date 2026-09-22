@@ -78,6 +78,8 @@ próximo), não por seletor CSS fixo.
 extensaoML/
 ├── manifest.json            <- manifest DE PRODUCAO (o que vale)
 ├── INSTRUCOES-CLIENTE.md    <- passo a passo de instalacao para a vendedora
+├── MENSAGEM-CLIENTE.md      <- mensagem pronta para mandar com o zip, e a
+│                               lista do que precisa voltar dela
 ├── empacotar.ps1            <- gera dist\ML-Metrics-<versao>.zip (so manifest,
 │                               icons e src). E ESTE zip que vai para a cliente.
 ├── icons/                   <- icon16/32/48/128.png
@@ -254,7 +256,7 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
 | Revisão 1 — resíduo #21 | ✅ corrida entre abas resolvida no lote 22 (gravação única no service worker). |
 | Harness | **271/271 PASS** (+4 no lote 27: `ehOrigemConhecida` — tela que já entregou números, ignorando a query). `node --check` ok em todos os JS. |
 | Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **57/57 PASS** (+8 no lote 27: aviso laranja no popup; marcar, copiar e desmarcar a conferência; tela conhecida que parou vira aviso; tela desconhecida não; tela que voltou a entregar sai do aviso). Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
-| Verificação no Edge | ✅ **21/21 PASS** (lote 28): extensão instalada de verdade, a partir do ZIP de `dist/`. Cobre os 11 itens da lista manual. |
+| Verificação no Edge | ✅ **23/23 PASS** (lote 28): extensão instalada de verdade, a partir do ZIP de `dist/`. Cobre os 11 itens da lista manual e mede o custo da leitura numa página real salva — **888 KB: 3 ms no portão, 7 ms na varredura completa** (22/09). |
 | Pacote | `dist\ML-Metrics-0.2.2.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
 
 ### ⚠️ Repositório público — decisão do Pedro
@@ -319,7 +321,8 @@ Os itens, todos cobertos pelo comando acima:
 
 ### Ação pendente (depois da verificação)
 
-1. Rodar `empacotar.ps1` e enviar `dist\ML-Metrics-0.2.2.zip` à cliente.
+1. Enviar `dist\ML-Metrics-0.2.2.zip` à cliente, com o texto do
+   **`MENSAGEM-CLIENTE.md`** (instalação em 4 passos e as 3 coisas que precisam voltar).
 2. A cliente segue **"Depois de uma atualização"** do guia: substituir os arquivos na
    mesma pasta, recarregar a extensão, conferir a versão **0.2.2** (também no popup),
    **F5** nas abas do ML.
@@ -387,7 +390,7 @@ código**: são decisões e ações do Pedro fora do repositório/extensão em s
 | # | Sev. | Título | Status | Quem resolve |
 |---|---|---|---|---|
 | #50 | MÉDIO | Privacidade no repositório GitHub (resíduo: repo público + histórico) | ⚠️ parcial | Pedro (GitHub) |
-| — | — | Commit do lote 27, verificação manual (11 itens), envio da 0.2.2 à cliente | ⬜ | Pedro |
+| — | — | Enviar a 0.2.2 à cliente (commits em dia; a verificação virou `node teste/verificar-no-edge.js`) | ⬜ | Pedro |
 
 ---
 
@@ -626,6 +629,13 @@ e conferir 11 itens na mão.
 | Esperas | Nada de `sleep` fixo: cada passo espera a condição acontecer (`ate`). A primeira versão passava por causa de dado da rodada anterior — hoje o perfil do Edge é apagado a cada execução. |
 | O que continua de olho | Aparência do painel e do popup, e a tela real do Mercado Livre. |
 
+### Lote 28b — custo medido e mensagem pronta (22/09/2026)
+
+| Item | O que foi feito |
+|---|---|
+| Custo da leitura | A verificação no Edge passou a medir, **dentro do mundo isolado da extensão** (`rodarNaExtensao`), quanto custa ler uma página real salva em `teste/` — as que têm dado da cliente e ficam fora do repositório. Em 888 KB: **3 ms** no portão (`paginaMencionaVisita`, que roda a cada lote de mutações em qualquer página do ML) e **7 ms** na varredura completa (com um rótulo plantado, já que a página salva é vitrine). Limites de 100 ms e 500 ms, para pegar regressão grande sem falhar em máquina ocupada. Sem página salva, o caso é **pulado**, não falha. → **23/23**. |
+| Mensagem pronta | `MENSAGEM-CLIENTE.md`: o texto para mandar junto com o zip (instalar em 4 passos, e depois diagnóstico + conferência dos 3 anúncios), mais a lista do que precisa voltar. Tira o atrito do passo que está travando o projeto. |
+
 ---
 
 ## 7. Leitura de conjunto (o diagnóstico de fundo)
@@ -706,7 +716,7 @@ tela real disser o que o número significa (#47), o histórico já estará lá, 
 | — | 26b — Chaves do storage num lugar só | — | ✅ | Feito em 18/09. |
 | — | 27 — Conferência num clique + aviso de tela que parou | — | ✅ | Feito em 21/09. |
 | — | 28 — Verificação no Edge automatizada | — | ✅ | Feito em 21/09. Só `teste/`. |
-| 1 | **Commit + verificação manual + decisão do repositório** | #21, #42, #43, #44, #45, #50, #56, #59 | ⬜ | Seção 4. Antes de mandar a 0.2.2 para a cliente. |
+| 1 | **Enviar a 0.2.2 + decisão do repositório** | #50 | ⬜ | Seção 4. O commit e a verificação dos 11 itens já estão resolvidos (lote 28). |
 | 2 | **★ Ação — capturar "Minhas publicações" real + conferência de 3 anúncios** | — | ⬜ | "Copiar diagnóstico" na tela (`telaAtual`, com `resumoDasRecusas`) e passo 7 do guia. Decide #47 e valida #38, #48 e #57. |
 | 3 | **23b — Período no rastro** | #47 | ⬜ | Com o `telaAtual.periodo` da tela real, registrar o recorte (7/30 dias) junto do rastro. |
 | 4 | **Decisão — religar a busca automática?** | — | ⬜ | Só se a tela real mostrar que o HTML buscado traz os números. |
@@ -770,7 +780,7 @@ paramos.
 | 21 — Robustez geral | ✅ feito | 15/09/2026 | Relato da cliente: "no anúncio aparecem só as visitas". Verificado no Node que a regra do #37 da 0.1.3 perdia vendas em texto corrido ("359 visitas 12 vendas") e gravava número errado ("… 12 vendas 5 disponíveis" → 5), além de aceitar "R$ 49" e "+1.000". **#57:** `lerRotulo` por fila de peças coladas (pontas decidem antes/depois; ambíguo recusa; recusa para de subir). **#58:** `motivoDoNumero` (preço, faixa +N, data, hora, decimal, %, período, mil, ano). **#59:** recusas com motivo no diagnóstico (`resumoDasRecusas`, `recusas`) e amostras por métrica. **#60:** preço só estruturado (meta ou JSON-LD). **#61:** idade por calendário, "13,9%", `lastError` lido. **#49:** SW valida remetente, https + domínio (também após redirect) e tem timeout. **#54 / #38 (exibição):** `codigosDaPagina` + `escolherRegistro`. **#47 (observer):** `characterData`, `href`, `every`. **#53:** extração que ignora comentário, string e regex. Guia: o diagnóstico explica recusas. Fixtures: comentários corrigidos, gabarito "13,9%". Harness **159/159**. **DOM real** (servidor local, `chrome` falso): gabarito exato; irmãos "359 visitas 12 vendas 5 disponíveis" → 359/12; "Estoque: 5 \| Vendas" recusado com motivo; painel 13,9%; receita "—" sem preço estruturado; item do `pdp_filters` escolhido. `manifest.json` → **0.1.4**, zip gerado. |
 | 22 — Tudo que não dependia da tela real | ✅ feito | 15/09/2026 | Pedido do Pedro: "pode fazer tudo". **Limite de custo:** `LIMITE_TEXTO_POR_NIVEL = 5000` em `valorDoRotulo` (medido ~7 ms por leitura em bloco de 100 mil caracteres). **#21:** `src/gravacao.js` (regra pura de mesclar, carregada no SW e nas abas) + fila única no `background.js` (`gravarNaFila`, mensagem "salvar"); o coletor manda gravar e, sem resposta, grava na aba (`gravarNestaAba`); `comCache` e a mesclagem saíram do coletor. **#38:** `codigosDentroDe` prefere o item quando o card também tem link de catálogo/user product. **#40 (decisão):** `anotarImplausiveis` não descarta; `calcular.vendasAcimaDasVisitas`; alerta no painel. **#46 (decisão):** sem painel "Sem dados" (`montarPainelVazio` removido). **Busca automática (decisão):** `BUSCA_AUTOMATICA_LIGADA = false`; guia: a extensão não faz nada sozinha. **Popup:** versão ao lado do nome. **#53:** harness com `gravacao.js` e service worker (três gravações simultâneas, remetente alheio, busca fora do ML e sem https) → **191/191**; teste em DOM real versionado (`teste/servidor-teste.js`, `teste/rodar-no-navegador.html`) → **31/31**. `manifest.json` → **0.1.5** (content_scripts com `gravacao.js`), zip gerado. |
 | 23a — Período no diagnóstico | ✅ feito | 15/09/2026 | Pedido do Pedro: preparar o diagnóstico para o #47. `telaAtual.periodo` (e `mlmetrics_diagnostico.periodo`): textos curtos de filtro de período (`ehTextoDePeriodo`, vocabulário fechado), com `marcado` pela opção de `<select>`, radio/checkbox do `<label>` ou `aria-selected/checked/pressed/current` (`estadoDoControle`); intervalo de datas também no valor de campo (sem campo escondido, senha, e-mail ou telefone); até 20, sem repetição, sem o painel. Só leitura: gravação e painel não mudam. Guia: o diagnóstico traz o período. Harness **221/221**; navegador **37/37** (controles reais). `manifest.json` → **0.1.6**, zip gerado. |
-| Commit + verificação manual + repositório | ⬜ a fazer | | Seção 4 (Pedro). |
+| Enviar a 0.2.2 + repositório | ⬜ a fazer | | Seção 4 (Pedro). Commit e verificação já saíram do caminho. |
 | 0.1.7 — robustez (Pedro) | ✅ feito | 15/09/2026 | Commit `2fedda6`, direto por ele: tempo limite do plano B, `ehData` por calendário, `try/catch` no `new URL`, `lastError.message`. Entrou sem teste e sem registro — dívida paga no lote 24. |
 | 24 — Erro visível | ✅ feito | 17/09/2026 | Pedido do Pedro ("o que dá para melhorar"). **Falha silenciosa:** `coletar()` e o diagnóstico em `try/catch`; `registrarErro` grava `mlmetrics_erro` (onde, mensagem, 3 linhas de pilha, host, tela mascarada, hora, versão) com trava de 1 min; aviso vermelho no popup e `ultimoErro` no relatório. **Dívida da 0.1.7:** `motivoDoNumero` recusa a forma de data com ponto — sem isso, `31.04.2023` virava 31.042.023 visitas. Harness **231/231**, navegador **42/42**. `manifest.json` → **0.1.8**, zip gerado. |
 | 25 — `coletor.js` dividido | ✅ feito | 17/09/2026 | Pedido do Pedro (itens 2 e 3 das melhorias). `leitura.js` (`MLMetricsLeitura`), `diagnostico.js` (`MLMetricsDiagnostico`) e `calculo.js` (`MLMetricsCalculo`) saíram de `coletor.js` (2.015 → 696) e `content.js` (747 → 435), com o texto exato de cada função movido por script e as chamadas entre arquivos prefixadas. `diagnosticarTelaAtual()` → `diagnosticarTela(doc, local)`. Manifest na ordem de dependência. Harness sem extrator (`carregarModulo`), +6 casos da ordem do manifest → **237/237**; navegador **42/42**. Os quatro `var` da 0.1.7 → `const`/`let`. `manifest.json` → **0.1.9**, zip gerado. |
@@ -778,6 +788,7 @@ paramos.
 | 26b — Chaves num lugar só | ✅ feito | 18/09/2026 | Pedido do Pedro ("arroche"). `PREFIXO_CHAVES` e `CHAVES` (congelado) no `gravacao.js`; `background.js`, `coletor.js`, `content.js` e `popup.js` usam dali (eram 12 declarações escritas à mão). Harness +6 → **267/267** (valores presos, prefixo, congelado, nenhum literal fora do `gravacao.js`); navegador **49/49** (painel carrega `gravacao.js`). `manifest.json` → **0.2.1**, zip gerado. |
 | 27 — Conferência e aviso de tela | ✅ feito | 21/09/2026 | Pedido do Pedro. Popup: "✓ bate"/"✗ não bate" por anúncio (gravado em `mlmetrics_conferencia`, sobrevive ao popup fechar, clique repetido desmarca) e "Copiar conferência" com números + trecho « ». Coletor: `marcarTelaFalhando`/`limparTelaFalhando` + `ehOrigemConhecida` → aviso laranja quando uma tela que já entregou números para de entregar. Guia: passo 7 e "O que me contar". Harness **271/271**, navegador **57/57**. `manifest.json` → **0.2.2**, zip gerado. |
 | 28 — Verificação no Edge | ✅ feito | 21/09/2026 | Pedido do Pedro. `teste/verificar-no-edge.js` + `teste/edge-cdp.js`: Edge sem janela com a extensão instalada (ZIP de `dist/`), fixtures servidas como `https://www.mercadolivre.com.br/...`, conversa por CDP. **21/21**, cobrindo os 11 itens da antiga lista manual. Reprova provada com cópia quebrada de propósito. Nenhum arquivo de `src/` mudou. |
+| 28b — Custo medido + mensagem | ✅ feito | 22/09/2026 | Pedido do Pedro. A verificação no Edge mede a leitura numa página real salva (888 KB: 3 ms no portão, 7 ms na varredura), pulando quando o arquivo não existe → **23/23**. `MENSAGEM-CLIENTE.md` com o texto pronto para enviar o zip. Nada em `src/`. |
 | 29 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
 | ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.2: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |

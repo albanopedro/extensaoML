@@ -79,13 +79,32 @@ function segundaTela(html) {
   return html.replace(/MLB-(\d)(\d{9})/g, "MLB-8$2");
 }
 
+/**
+ * Uma pagina REAL do Mercado Livre salva em teste/, se existir nesta maquina.
+ *
+ * Esses arquivos (MLreal*.html, testenomantereal*.html) tem dado da cliente e
+ * estao no .gitignore - nunca entram no repositorio. Quem os tem mede o custo
+ * da leitura numa pagina do tamanho de verdade (perto de 900 KB); quem nao os
+ * tem simplesmente pula esse caso. Nada do conteudo e impresso: so tempo.
+ *
+ * @returns {string|null} nome do arquivo em teste/
+ */
+function paginaRealSalva() {
+  const candidatas = fs.readdirSync(__dirname).filter(function (nome) {
+    return /^(MLreal|testenomantereal).*\.html$/.test(nome);
+  });
+
+  return candidatas.length > 0 ? candidatas.sort()[0] : null;
+}
+
 function criarServidor() {
   const { chave, cert } = certificado(pastaDoTeste());
 
   const paginas = {
     "/anuncios/lista": "publicacoes.html",
     "/vendas/lista": "publicacoes.html",
-    "/MLB-1111111111-caixa-organizadora": "MLB-1111111111-anuncio.html"
+    "/MLB-1111111111-caixa-organizadora": "MLB-1111111111-anuncio.html",
+    "/pagina-pesada": paginaRealSalva()
   };
 
   return https.createServer({
@@ -376,6 +395,65 @@ async function verificar() {
 
     testar("item 4 - limpar apaga todas as chaves da extensao", [],
       chavesDaExtensao(await armazenamento(navegador, sw)));
+
+    // --- Custo da leitura numa pagina real (pesada) ------------------------
+    // A leitura roda a cada mutacao do DOM, e a pagina do ML e grande. Se ela
+    // pesar, a navegacao da cliente engasga - e ninguem associaria isso a
+    // extensao. Medimos na pagina real salva (fora do repositorio); sem ela,
+    // o caso e pulado.
+    const pesada = paginaRealSalva();
+
+    if (!pesada) {
+      console.log("PULADO | custo da leitura: nenhuma pagina real salva em teste/");
+    } else {
+      const aba = await navegador.abrirAba("https://www.mercadolivre.com.br/pagina-pesada");
+      await esperar(1500);
+
+      const tamanho = await navegador.rodar(aba.sessao,
+        "return document.documentElement.outerHTML.length;");
+
+      // O portao: roda em TODA pagina do ML, a cada lote de mutacoes. E o
+      // custo que a cliente paga o tempo todo, mesmo onde nao ha o que ler.
+      const portao = await navegador.rodarNaExtensao(aba, "ML Metrics", `
+        const tempos = [];
+        for (let i = 0; i < 3; i++) {
+          const inicio = performance.now();
+          MLMetricsLeitura.paginaMencionaVisita(document);
+          tempos.push(performance.now() - inicio);
+        }
+        return Math.round(Math.min(...tempos));
+      `);
+
+      // A varredura inteira: so acontece em tela de vendedor. Como a pagina
+      // salva e uma vitrine, plantamos um rotulo para o pior caso rodar.
+      const varredura = await navegador.rodarNaExtensao(aba, "ML Metrics", `
+        const enfeite = document.createElement("div");
+        enfeite.innerHTML = '<a href="/MLB-1234567890-teste">anuncio</a>' +
+          "<span>359 visitas totais</span><span>12 vendas</span>";
+        document.body.appendChild(enfeite);
+
+        const tempos = [];
+        for (let i = 0; i < 3; i++) {
+          const inicio = performance.now();
+          MLMetricsLeitura.varrerPagina(document, location.href);
+          tempos.push(performance.now() - inicio);
+        }
+        enfeite.remove();
+        return Math.round(Math.min(...tempos));
+      `);
+
+      console.log("       (pagina de " + Math.round(tamanho / 1024) + " KB: portao " +
+        portao + " ms, varredura completa " + varredura + " ms)");
+
+      // Medido em 22/09/2026 nesta pagina de 888 KB: portao 3 ms, varredura
+      // completa 7 ms. Os limites sao folgados de proposito (maquina ocupada
+      // mede pior): o que se quer pegar e regressao grande, do tipo "ficou
+      // dez vezes mais lento", nao milissegundo.
+      testar("custo: o portao de cada mutacao fica abaixo de 100 ms", true, portao < 100);
+      testar("custo: a varredura completa fica abaixo de 500 ms", true, varredura < 500);
+
+      await navegador.fecharAba(aba);
+    }
 
     // --- Item 3: extensao recarregada deixa a aba orfa (#42) ---------------
     // Por ultimo: recarregar a extensao mata os content scripts de TODAS as
