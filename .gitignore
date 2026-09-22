@@ -6,3 +6,11 @@ teste/testenomantereal*
 # Pacotes gerados pelo empacotar.ps1 - sao refeitos a partir de src/ a
 # qualquer momento e nao pertencem ao repositorio.
 dist/
+
+# O que a cliente cola na conversa ("Copiar diagnostico" e "Copiar
+# conferencia"): tem trecho de texto das telas dela, com nome de produto.
+# Salvar com estes nomes para o leitor (teste/ler-diagnostico.js) sem risco
+# de commitar sem querer.
+diagnostico*.json
+diagnostico*.txt
+conferencia*.txt

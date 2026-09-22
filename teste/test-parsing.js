@@ -965,6 +965,76 @@ testar("url invalida: o rastro diz que a tela e desconhecida", "(url invalida)",
   rUrlInvalida["MLB3456789012"].origem.visitas.tela);
 
 console.log("");
+console.log("=== leitor do diagnostico (lote 29) ===");
+// O leitor le o que a cliente cola e diz o que aquilo DECIDE. Cada caso aqui
+// e uma resposta que a gente espera tirar dela sem ficar garimpando JSON.
+const { resumir } = require("./ler-diagnostico.js");
+
+function relatorioDe(tela, extras) {
+  return JSON.stringify(Object.assign({
+    versao: "0.2.2",
+    geradoEm: new Date(2026, 8, 22, 10, 0).toISOString(),
+    telaAtual: tela,
+    ultimoErro: null,
+    origens: [],
+    capturado: {},
+    historico: { anuncios: 0, registros: 0, primeiroDia: null, ultimoDia: null },
+    conferencia: {},
+    telasFalhando: {}
+  }, extras || {}));
+}
+
+const telaDeVendedor = {
+  host: "www.mercadolivre.com.br",
+  caminho: "/anuncios/lista",
+  vitrine: false,
+  mencionaVisita: true,
+  capturariaAgora: { MLB1234567890: { visitas: 359 } },
+  periodo: [{ onde: "opcao de lista", texto: "Últimos 30 dias", marcado: true }],
+  resumoDasRecusas: {},
+  recusas: [],
+  amostras: []
+};
+
+testar("leitor: periodo marcado decide o #47", true,
+  /#47: a tela está filtrada em "Últimos 30 dias"/.test(resumir(relatorioDe(telaDeVendedor), "0.2.2")));
+
+testar("leitor: sem periodo nenhum, o #47 continua aberto", true,
+  /#47 continua aberto/.test(resumir(relatorioDe(
+    Object.assign({}, telaDeVendedor, { periodo: [] })), "0.2.2")));
+
+testar("leitor: diagnostico tirado na vitrine e apontado", true,
+  /página de produto, não da tela de vendedor/.test(resumir(relatorioDe(
+    Object.assign({}, telaDeVendedor, { vitrine: true })), "0.2.2")));
+
+testar("leitor: tela sem a palavra visita", true,
+  /não tem a palavra "visita"/.test(resumir(relatorioDe(
+    Object.assign({}, telaDeVendedor, { mencionaVisita: false })), "0.2.2")));
+
+testar("leitor: erro gravado vem antes de tudo", true,
+  /ERRO na leitura, em coletar/.test(resumir(relatorioDe(telaDeVendedor, {
+    ultimoErro: { onde: "coletar", mensagem: "DOM inesperado", quando: 1, tela: "/anuncios/lista" }
+  }), "0.2.2")));
+
+testar("leitor: motivo de recusa mais comum vira recomendacao", true,
+  /vendas: ambiguo/.test(resumir(relatorioDe(Object.assign({}, telaDeVendedor, {
+    resumoDasRecusas: { "vendas: ambiguo": 7, "visitas: preco": 1 },
+    recusas: [{ metrica: "vendas", motivo: "ambiguo", trecho: "«Estoque: 5 | Vendas»" }]
+  })), "0.2.2")));
+
+testar("leitor: versao antiga da cliente e avisada", true,
+  /versão antiga \(0\.1\.9\)/.test(resumir(relatorioDe(telaDeVendedor, { versao: "0.1.9" }), "0.2.2")));
+
+testar("leitor: conferencia conta o que bateu e o que nao", true,
+  /NÃO bateram: 1/.test(resumir(
+    "CONFERÊNCIA ML Metrics v0.2.2 — 22/09/2026\n\n" +
+    "BATEU — MLB1111111111\n  visitas: 359\n\n" +
+    "NÃO BATEU — MLB2222222222\n  vendas: 12\n")));
+
+testar("leitor: texto que nao e nenhum dos dois nao estoura", true,
+  /não é o texto do/.test(resumir("oi, mandei o print por email")));
+
+console.log("");
 console.log("=== manifest - cada arquivo depois de quem ele usa ===");
 // Os arquivos de src/ conversam por variaveis globais: o leitura.js define
 // MLMetricsLeitura, e o coletor.js usa. Se o manifest carregar um arquivo
