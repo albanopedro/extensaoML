@@ -30,6 +30,34 @@ function diasEntre(depois, antes) {
   return Math.round((depois - antes) / (24 * 60 * 60 * 1000));
 }
 
+/**
+ * Quebra um texto longo em linhas que cabem no terminal, com recuo nas
+ * continuacoes. Conclusao que vira uma linha de 300 caracteres nao e lida.
+ *
+ * @param {string} texto
+ * @param {string} recuo espacos das linhas seguintes
+ * @param {number} [largura]
+ * @returns {string[]}
+ */
+function quebrar(texto, recuo, largura) {
+  const limite = (largura || 78) - recuo.length;
+  const linhas = [];
+  let atual = "";
+
+  String(texto).split(" ").forEach(function (palavra) {
+    if (atual && (atual + " " + palavra).length > limite) {
+      linhas.push(atual);
+      atual = palavra;
+    } else {
+      atual = atual ? atual + " " + palavra : palavra;
+    }
+  });
+
+  if (atual) linhas.push(atual);
+
+  return linhas.map(function (linha, i) { return (i === 0 ? "" : recuo) + linha; });
+}
+
 function formatarData(valor) {
   if (!valor) return "?";
   const data = new Date(valor);
@@ -290,8 +318,21 @@ function lerDiagnostico(relatorio, versaoAtual) {
     saida.push("");
     saida.push("CONFERÊNCIA MARCADA POR ELA");
     saida.push("  " + conferidos.length + " anúncio(s) marcado(s), " +
-      naoBateram.length + " que NÃO bateram" +
+      naoBateram.length + (naoBateram.length === 1 ? " que NÃO bateu" : " que NÃO bateram") +
       (naoBateram.length ? ": " + naoBateram.join(", ") : ""));
+
+    // A conferencia e o que libera (ou trava) mostrar o historico: entra nas
+    // conclusoes, nao so na lista.
+    if (naoBateram.length === 0) {
+      conclusoes.push("Os " + conferidos.length + " anúncio(s) conferidos BATERAM com o " +
+        "Mercado Livre: a leitura está certa onde ela olhou. É o que faltava para " +
+        "mostrar vendas/mês e faturamento/mês (lote 29).");
+    } else {
+      conclusoes.push(naoBateram.length + " anúncio(s) NÃO bateram (" + naoBateram.join(", ") +
+        "): compare o trecho « » de cada um com o número certo do ML — é ali que está a " +
+        "regra de leitura errada. Enquanto isso não fechar, o histórico não deve ser " +
+        "exibido.");
+    }
   }
 
   // --- O que isso decide ---------------------------------------------------
@@ -304,7 +345,9 @@ function lerDiagnostico(relatorio, versaoAtual) {
     saida.push("  na tela \"Minhas publicações\", com a lista carregada até o fim.");
   } else {
     conclusoes.forEach(function (conclusao, i) {
-      saida.push("  " + (i + 1) + ". " + conclusao);
+      quebrar((i + 1) + ". " + conclusao, "     ").forEach(function (linha) {
+        saida.push("  " + linha);
+      });
     });
   }
 

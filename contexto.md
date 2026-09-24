@@ -110,11 +110,13 @@ extensaoML/
 │                            com a origem de cada numero, limpa dados, copia
 │                            diagnostico da aba aberta.
 ├── teste/
-│   ├── test-parsing.js             Harness Node (237 casos, 237/237 PASS em 17/09):
+│   ├── test-parsing.js             Harness Node (283 casos, 283/283 PASS em 24/09):
 │   │                               carrega leitura/diagnostico/calculo/gravacao
 │   │                               como sao, o service worker e a ordem do manifest.
 │   ├── servidor-teste.js           Servidor local (127.0.0.1, lista fechada).
 │   ├── rodar-no-navegador.html     Teste em DOM real (57 casos, 57/57 PASS).
+│   ├── ler-diagnostico.js          Resume o que a cliente colar (diagnostico
+│   │                               ou conferencia) e diz o que aquilo decide.
 │   ├── verificar-no-edge.js        Os 11 itens da lista manual, com a extensao
 │   │                               INSTALADA no Edge (21 casos, 21/21 PASS).
 │   ├── edge-cdp.js                 A mecanica: sobe o Edge com a extensao,
@@ -254,7 +256,7 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
 | Pedido do Pedro (21/09) — lote 27 | ✅ **conferência num clique** (marca "bate"/"não bate" por anúncio, gravada, e "Copiar conferência" com o texto pronto) e **aviso de tela que parou de entregar números** (laranja no popup, quando uma tela que já funcionou deixa de entregar). |
 | Pedido do Pedro (21/09) — lote 28 | ✅ **verificação no Edge automatizada**: `node teste/verificar-no-edge.js` sobe o Edge com a extensão instalada e roda os 11 itens da antiga lista manual (**21/21**). Provado com defeito de propósito: quebrando o `extensaoViva` do `content.js`, o item do script órfão reprova. |
 | Revisão 1 — resíduo #21 | ✅ corrida entre abas resolvida no lote 22 (gravação única no service worker). |
-| Harness | **271/271 PASS** (+4 no lote 27: `ehOrigemConhecida` — tela que já entregou números, ignorando a query). `node --check` ok em todos os JS. |
+| Harness | **283/283 PASS** (+12 no lote 28c: o leitor do diagnóstico — período, vitrine, erro, recusas, versão antiga, conferência e texto colado errado). `node --check` ok em todos os JS. |
 | Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **57/57 PASS** (+8 no lote 27: aviso laranja no popup; marcar, copiar e desmarcar a conferência; tela conhecida que parou vira aviso; tela desconhecida não; tela que voltou a entregar sai do aviso). Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
 | Verificação no Edge | ✅ **23/23 PASS** (lote 28): extensão instalada de verdade, a partir do ZIP de `dist/`. Cobre os 11 itens da lista manual e mede o custo da leitura numa página real salva — **888 KB: 3 ms no portão, 7 ms na varredura completa** (22/09). |
 | Pacote | `dist\ML-Metrics-0.2.2.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
@@ -332,7 +334,8 @@ Os itens, todos cobertos pelo comando acima:
    diagnóstico" nessa tela** e cola na conversa. Se as vendas ainda não aparecerem,
    `telaAtual.resumoDasRecusas` e `telaAtual.recusas` dizem o motivo exato. O
    `telaAtual.periodo` decide o #47 (período), e o mesmo `telaAtual` valida #38, #48 e
-   #57 na tela real.
+   #57 na tela real. **Salve o texto dela num arquivo e rode
+   `node teste/ler-diagnostico.js <arquivo>`**: ele resume e diz o que aquilo decide.
 5. A cliente faz a **conferência de 3 anúncios** (passo 7 do guia): no popup, marca
    **"✓ bate"** ou **"✗ não bate"** em cada um e clica em **"Copiar conferência"** —
    o texto já sai com os números e o trecho « » de cada um (lote 27).
@@ -636,6 +639,21 @@ e conferir 11 itens na mão.
 | Custo da leitura | A verificação no Edge passou a medir, **dentro do mundo isolado da extensão** (`rodarNaExtensao`), quanto custa ler uma página real salva em `teste/` — as que têm dado da cliente e ficam fora do repositório. Em 888 KB: **3 ms** no portão (`paginaMencionaVisita`, que roda a cada lote de mutações em qualquer página do ML) e **7 ms** na varredura completa (com um rótulo plantado, já que a página salva é vitrine). Limites de 100 ms e 500 ms, para pegar regressão grande sem falhar em máquina ocupada. Sem página salva, o caso é **pulado**, não falha. → **23/23**. |
 | Mensagem pronta | `MENSAGEM-CLIENTE.md`: o texto para mandar junto com o zip (instalar em 4 passos, e depois diagnóstico + conferência dos 3 anúncios), mais a lista do que precisa voltar. Tira o atrito do passo que está travando o projeto. |
 
+### Lote 28c — leitor do diagnóstico (24/09/2026)
+
+Pedido do Pedro. Só ferramenta (`teste/`), nada em `src/`.
+
+```bash
+node teste/ler-diagnostico.js diagnostico.json     # ou:  ... < conferencia.txt
+```
+
+| Item | O que foi feito |
+|---|---|
+| O que faz | Lê **os dois** textos que a cliente cola — o JSON do "Copiar diagnóstico" e o texto do "Copiar conferência" — e escreve um resumo curto: versão dela (avisa se for antiga), erro gravado, telas que pararam, a tela do clique com as travas, **o período (que decide o #47)**, recusas por motivo com um exemplo de trecho, o que está guardado, histórico, origens e conferência. |
+| O que importa | Termina em **"O QUE ISSO DECIDE"**: conclusões prontas, do tipo "o diagnóstico saiu de uma página de produto, peça outro em Minhas publicações", "#47: a tela está filtrada em Últimos 30 dias", "N anúncios não bateram: compare o trecho « » com o número certo". Linhas quebradas em 78 colunas. |
+| Privacidade | O arquivo colado tem texto das telas dela (nome de produto nos trechos). O `.gitignore` passou a cobrir `diagnostico*.json/txt` e `conferencia*.txt`, para não commitar sem querer. O leitor só imprime: não grava nem envia nada. |
+| Testes | Harness +12 → **283/283**: período marcado e ausente, vitrine, tela sem "visita", erro, motivo de recusa mais comum, versão antiga, conferência que bateu e que não bateu, quebra de linha e texto colado errado (não estoura). |
+
 ---
 
 ## 7. Leitura de conjunto (o diagnóstico de fundo)
@@ -789,6 +807,7 @@ paramos.
 | 27 — Conferência e aviso de tela | ✅ feito | 21/09/2026 | Pedido do Pedro. Popup: "✓ bate"/"✗ não bate" por anúncio (gravado em `mlmetrics_conferencia`, sobrevive ao popup fechar, clique repetido desmarca) e "Copiar conferência" com números + trecho « ». Coletor: `marcarTelaFalhando`/`limparTelaFalhando` + `ehOrigemConhecida` → aviso laranja quando uma tela que já entregou números para de entregar. Guia: passo 7 e "O que me contar". Harness **271/271**, navegador **57/57**. `manifest.json` → **0.2.2**, zip gerado. |
 | 28 — Verificação no Edge | ✅ feito | 21/09/2026 | Pedido do Pedro. `teste/verificar-no-edge.js` + `teste/edge-cdp.js`: Edge sem janela com a extensão instalada (ZIP de `dist/`), fixtures servidas como `https://www.mercadolivre.com.br/...`, conversa por CDP. **21/21**, cobrindo os 11 itens da antiga lista manual. Reprova provada com cópia quebrada de propósito. Nenhum arquivo de `src/` mudou. |
 | 28b — Custo medido + mensagem | ✅ feito | 22/09/2026 | Pedido do Pedro. A verificação no Edge mede a leitura numa página real salva (888 KB: 3 ms no portão, 7 ms na varredura), pulando quando o arquivo não existe → **23/23**. `MENSAGEM-CLIENTE.md` com o texto pronto para enviar o zip. Nada em `src/`. |
+| 28c — Leitor do diagnóstico | ✅ feito | 24/09/2026 | Pedido do Pedro. `teste/ler-diagnostico.js`: lê o JSON do "Copiar diagnóstico" ou o texto do "Copiar conferência" e resume, terminando em "O QUE ISSO DECIDE" (período/#47, vitrine, tela sem "visita", recusas por motivo, conferência que não bateu, versão antiga). `.gitignore` cobrindo os arquivos colados. Harness **283/283**. Nada em `src/`. |
 | 29 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
 | ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.2: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |

@@ -965,7 +965,7 @@ testar("url invalida: o rastro diz que a tela e desconhecida", "(url invalida)",
   rUrlInvalida["MLB3456789012"].origem.visitas.tela);
 
 console.log("");
-console.log("=== leitor do diagnostico (lote 29) ===");
+console.log("=== leitor do diagnostico (lote 28c) ===");
 // O leitor le o que a cliente cola e diz o que aquilo DECIDE. Cada caso aqui
 // e uma resposta que a gente espera tirar dela sem ficar garimpando JSON.
 const { resumir } = require("./ler-diagnostico.js");
@@ -1024,6 +1024,21 @@ testar("leitor: motivo de recusa mais comum vira recomendacao", true,
 
 testar("leitor: versao antiga da cliente e avisada", true,
   /versão antiga \(0\.1\.9\)/.test(resumir(relatorioDe(telaDeVendedor, { versao: "0.1.9" }), "0.2.2")));
+
+testar("leitor: conferencia que bateu libera o historico", true,
+  /BATERAM com o Mercado Livre/.test(resumir(relatorioDe(telaDeVendedor, {
+    conferencia: { MLB1234567890: { resultado: "bate" }, MLB2345678901: { resultado: "bate" } }
+  }), "0.2.2")));
+
+testar("leitor: conferencia que nao bateu manda comparar o trecho", true,
+  /NÃO bateram \(MLB2345678901\)/.test(resumir(relatorioDe(telaDeVendedor, {
+    conferencia: { MLB2345678901: { resultado: "nao" } }
+  }), "0.2.2")));
+
+testar("leitor: conclusao longa e quebrada para caber no terminal", true,
+  resumir(relatorioDe(telaDeVendedor), "0.2.2").split("\n").every(function (linha) {
+    return linha.length <= 80;
+  }));
 
 testar("leitor: conferencia conta o que bateu e o que nao", true,
   /NÃO bateram: 1/.test(resumir(
