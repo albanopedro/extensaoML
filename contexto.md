@@ -117,6 +117,10 @@ extensaoML/
 │   ├── rodar-no-navegador.html     Teste em DOM real (59 casos, 59/59 PASS).
 │   ├── ler-diagnostico.js          Resume o que a cliente colar (diagnostico
 │   │                               ou conferencia) e diz o que aquilo decide.
+│   ├── abrir-demo.js               Abre o Edge com a extensao instalada e as
+│   │                               telas de teste, para VER e clicar.
+│   ├── servidor-ml-falso.js        As fixtures servidas em https://...
+│   │                               mercadolivre.com.br (usado pelos dois).
 │   ├── verificar-no-edge.js        Os 11 itens da lista manual, com a extensao
 │   │                               INSTALADA no Edge (21 casos, 21/21 PASS).
 │   ├── edge-cdp.js                 A mecanica: sobe o Edge com a extensao,
@@ -287,6 +291,21 @@ Windows); nada sai da máquina e o perfil do Edge é novo, sem login.
 
 **O que ele NÃO cobre, e continua sendo de olho:** aparência do painel e do popup (cor,
 posição, texto cortado) e qualquer coisa na tela real do Mercado Livre.
+
+### Ver funcionando sem conta de vendedor (lote 29b)
+
+```bash
+node teste/abrir-demo.js
+```
+
+Abre o Edge **com janela**, com a extensão instalada e as telas de teste servidas no
+endereço de verdade. Dá para ver o aviso verde da captura, o painel no anúncio, o rastro
+« » no popup e a conferência — clicando, não lendo. Perfil descartável: o Edge do dia a
+dia não é tocado. Encerra ao fechar a janela (ou Ctrl+C).
+
+Serve quando não há conta de vendedor à mão — foi o caso em 24/09, quando o Pedro
+instalou a extensão e, como não tem anúncio nenhum, não havia tela de vendedor real
+onde ela pudesse capturar.
 
 Os itens, todos cobertos pelo comando acima:
 
@@ -825,6 +844,7 @@ paramos.
 | 28b — Custo medido + mensagem | ✅ feito | 22/09/2026 | Pedido do Pedro. A verificação no Edge mede a leitura numa página real salva (888 KB: 3 ms no portão, 7 ms na varredura), pulando quando o arquivo não existe → **23/23**. `MENSAGEM-CLIENTE.md` com o texto pronto para enviar o zip. Nada em `src/`. |
 | 28c — Leitor do diagnóstico | ✅ feito | 24/09/2026 | Pedido do Pedro. `teste/ler-diagnostico.js`: lê o JSON do "Copiar diagnóstico" ou o texto do "Copiar conferência" e resume, terminando em "O QUE ISSO DECIDE" (período/#47, vitrine, tela sem "visita", recusas por motivo, conferência que não bateu, versão antiga). `.gitignore` cobrindo os arquivos colados. Harness **283/283**. Nada em `src/`. |
 | 29 — Item achado na página | ✅ feito | 24/09/2026 | Pedro instalou e não apareceu painel num anúncio `/up/MLBU…`: a URL não tem código de item e o cache só guarda item. `codigoDoItemNaPagina` (`calculo.js`) acha o item nos links da página por dominância (≥3 e 3× o segundo; senão `null`), e `chaveDaPagina` o põe na frente. Fecha a metade da exibição do #38. Harness **289/289**, navegador **59/59**, Edge **27/27** (inclusive na página real salva). `manifest.json` → **0.2.3**. |
+| 29b — Demonstração no Edge | ✅ feito | 24/09/2026 | `node teste/abrir-demo.js`: Edge com janela, extensão instalada e as telas de teste no endereço de verdade, para ver e clicar sem conta de vendedor. O servidor das fixtures virou `teste/servidor-ml-falso.js`, compartilhado com a verificação (que seguiu **27/27** depois da mudança). Nada em `src/`. |
 | 30 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
 | ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.3: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |
