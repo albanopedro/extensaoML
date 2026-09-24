@@ -36,6 +36,13 @@ const PERMITIDOS = [
   /^\/teste\/vitrine-up-sanitizada\.html$/
 ];
 
+// A vitrine sanitizada tambem responde numa rota com a FORMA da real
+// ("/kit-2-caixa/up/MLBU..."). O painel decide o que procurar a partir do
+// endereco, entao testar o caso do /up/ exige um endereco de /up/ - com o
+// arquivo aberto direto, o caminho nao tem codigo nenhum.
+const ROTA_DA_VITRINE = "/kit-2-caixa/up/MLBU0000000001";
+const ARQUIVO_DA_VITRINE = "/teste/vitrine-up-sanitizada.html";
+
 const TIPOS = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -53,13 +60,15 @@ http.createServer(function (pedido, resposta) {
     return;
   }
 
-  if (!PERMITIDOS.some(function (regra) { return regra.test(rota); })) {
+  const caminho = rota === ROTA_DA_VITRINE ? ARQUIVO_DA_VITRINE : rota;
+
+  if (!PERMITIDOS.some(function (regra) { return regra.test(caminho); })) {
     resposta.writeHead(403);
     resposta.end("fora da lista de arquivos do teste");
     return;
   }
 
-  fs.readFile(path.join(RAIZ, rota), function (erro, dados) {
+  fs.readFile(path.join(RAIZ, caminho), function (erro, dados) {
     if (erro) {
       resposta.writeHead(404);
       resposta.end("nao encontrado");
@@ -67,7 +76,7 @@ http.createServer(function (pedido, resposta) {
     }
 
     resposta.writeHead(200, {
-      "Content-Type": TIPOS[path.extname(rota)] || "application/octet-stream",
+      "Content-Type": TIPOS[path.extname(caminho)] || "application/octet-stream",
       // Sem cache: o teste sempre roda a versao atual dos arquivos.
       "Cache-Control": "no-store"
     });

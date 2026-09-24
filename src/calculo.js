@@ -134,6 +134,77 @@ var MLMetricsCalculo = (function () {
     return null;
   }
 
+  // Quantas vezes o codigo do item precisa aparecer nos links da pagina, e
+  // quantas vezes mais que o segundo colocado, para valer como "o item desta
+  // pagina". Medido nas duas paginas reais salvas em teste/: o item da pagina
+  // aparece 24 vezes e CADA outro produto (recomendados, "quem viu tambem
+  // viu") aparece 1 vez. Com folga desse tamanho, exigir 3 e o triplo do
+  // segundo separa com sobra - e, na duvida, nao escolhe ninguem.
+  const MINIMO_DE_LINKS = 3;
+  const VANTAGEM_SOBRE_O_SEGUNDO = 3;
+
+  // Quantos links da pagina olhamos. Pagina de produto real tem ~340; o teto
+  // existe so para uma pagina fora do comum nao custar caro.
+  const MAX_LINKS = 2000;
+
+  /**
+   * Procura, DENTRO da pagina, o codigo do ITEM que ela esta mostrando.
+   *
+   * Por que isso e necessario: o ML tem tres espacos de codigo. A tela de
+   * vendedor (e o cache) usa o do ITEM ("MLB3456789012"); a vitrine nova usa
+   * o de user product no caminho ("/up/MLBU5098..."), e a de catalogo usa
+   * "/p/MLB...". Numa URL como
+   *
+   *   /kit-2-caixa.../up/MLBU0000000001?pdp_filters=seller_id%3A123
+   *
+   * nao existe NENHUM codigo de item: o painel procurava pelo MLBU, o cache
+   * so tinha o MLB do item, e nada aparecia - mesmo com o numero capturado.
+   * Foi o que aconteceu na primeira instalacao (24/09/2026).
+   *
+   * Mas o codigo do item esta na propria pagina: os links dela carregam
+   * "pdp_filters=item_id:MLB..." e "wid=MLB..." (o item vencedor da caixa de
+   * compra). O problema e que a pagina TAMBEM linka outros produtos. Por isso
+   * a regra e por dominancia, nao por "achei um": o item da pagina se repete
+   * em dezenas de links, os outros aparecem uma vez cada. Sem vencedor claro,
+   * devolve null - e o painel segue com o que a URL diz.
+   *
+   * @param {Document} doc
+   * @returns {string|null} codigo do item, ou null quando nao da para afirmar
+   */
+  function codigoDoItemNaPagina(doc) {
+    const links = doc.querySelectorAll("a[href]");
+    const vezes = {};
+
+    for (let i = 0; i < links.length && i < MAX_LINKS; i++) {
+      const href = links[i].getAttribute("href") || "";
+
+      // O ML escreve esses parametros codificados, as vezes duas vezes
+      // ("%253A"). Decodificar so o que interessa evita depender de
+      // decodeURIComponent, que estoura com "%" solto no endereco.
+      const limpo = href.replace(/%253A|%3A/gi, ":").replace(/%26/gi, "&");
+      const achados = limpo.match(/(item_id[:=]|wid=)MLB[A-Z]?\d{6,}/gi) || [];
+
+      achados.forEach(function (achado) {
+        const codigo = achado.match(/MLB[A-Z]?\d{6,}/i)[0];
+        vezes[codigo] = (vezes[codigo] || 0) + 1;
+      });
+    }
+
+    const ordenados = Object.keys(vezes).sort(function (a, b) {
+      return vezes[b] - vezes[a];
+    });
+
+    if (ordenados.length === 0) return null;
+
+    const campeao = ordenados[0];
+    const segundo = ordenados.length > 1 ? vezes[ordenados[1]] : 0;
+
+    if (vezes[campeao] < MINIMO_DE_LINKS) return null;
+    if (segundo > 0 && vezes[campeao] < segundo * VANTAGEM_SOBRE_O_SEGUNDO) return null;
+
+    return campeao;
+  }
+
   // --------------------------------------------------------------------------
   // Formatacao
   // --------------------------------------------------------------------------
@@ -340,6 +411,7 @@ var MLMetricsCalculo = (function () {
     PADRAO_CODIGO: PADRAO_CODIGO,
     DIAS_PARA_ALERTA: DIAS_PARA_ALERTA,
     codigosDaPagina: codigosDaPagina,
+    codigoDoItemNaPagina: codigoDoItemNaPagina,
     precoDoJsonLd: precoDoJsonLd,
     formatarReais: formatarReais,
     formatarPercentual: formatarPercentual,

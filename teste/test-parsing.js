@@ -110,6 +110,7 @@ const {
   somenteComOrigem,
   escolherRegistro,
   codigosDaPagina,
+  codigoDoItemNaPagina,
   precoDoJsonLd,
   diasDesde,
   formatarPercentual
@@ -482,7 +483,13 @@ function percorrerTextos(root, mostraTexto, filtro) {
 }
 
 function documentoDa(body) {
-  return { body: body, createTreeWalker: percorrerTextos };
+  return {
+    body: body,
+    createTreeWalker: percorrerTextos,
+    // document.querySelectorAll procura na pagina inteira; no stub, o body
+    // E a pagina inteira.
+    querySelectorAll: function (seletor) { return body.querySelectorAll(seletor); }
+  };
 }
 
 // Tela de vendedor: dois cards, cada um com o proprio link e as duas
@@ -963,6 +970,55 @@ const rUrlInvalida = varrerPagina(documentoDa(corpoVendedor), "nao-e-uma-url");
 testar("url invalida: a leitura continua", 359, rUrlInvalida["MLB3456789012"].visitas);
 testar("url invalida: o rastro diz que a tela e desconhecida", "(url invalida)",
   rUrlInvalida["MLB3456789012"].origem.visitas.tela);
+
+console.log("");
+console.log("=== codigo do item DENTRO da pagina (lote 29) ===");
+// O caso que apareceu na primeira instalacao: numa rota /up/MLBU... a URL nao
+// tem codigo de item nenhum, e o cache so guarda item. O codigo do item esta
+// nos links da propria pagina - repetido dezenas de vezes, enquanto cada
+// produto recomendado aparece uma vez so.
+function linkPara(endereco) {
+  return elementoDa("a", { href: endereco }, [textoDa("link")]);
+}
+
+function paginaComLinks(enderecos) {
+  return documentoDa(elementoDa("body", {}, enderecos.map(linkPara)));
+}
+
+const ITEM = "MLB3456789012";
+const linksDaVitrine = [];
+for (let i = 0; i < 24; i++) {
+  linksDaVitrine.push("/kit-2-caixa/up/MLBU0000000001?pdp_filters=item_id%3A" + ITEM);
+}
+// Produtos recomendados: um link cada, como nas paginas reais.
+linksDaVitrine.push("/outro-produto/p/MLB1111111?pdp_filters=item_id%3AMLB9999999999");
+linksDaVitrine.push("/mais-um/p/MLB2222222?wid=MLB8888888888");
+
+testar("item na pagina: o codigo repetido nos links vence", ITEM,
+  codigoDoItemNaPagina(paginaComLinks(linksDaVitrine)));
+
+testar("item na pagina: wid tambem conta", ITEM, codigoDoItemNaPagina(paginaComLinks([
+  "/x?wid=" + ITEM, "/y?wid=" + ITEM, "/z?wid=" + ITEM, "/w?wid=MLB7777777777"
+])));
+
+testar("item na pagina: codigo duplamente codificado (%253A) tambem conta", ITEM,
+  codigoDoItemNaPagina(paginaComLinks([
+    "/a?pdp_filters=item_id%253A" + ITEM,
+    "/b?pdp_filters=item_id%253A" + ITEM,
+    "/c?pdp_filters=item_id%253A" + ITEM
+  ])));
+
+testar("item na pagina: aparecendo pouco, nao vale", null,
+  codigoDoItemNaPagina(paginaComLinks(["/a?wid=" + ITEM, "/b?wid=" + ITEM])));
+
+testar("item na pagina: dois codigos disputando, nao escolhe nenhum", null,
+  codigoDoItemNaPagina(paginaComLinks([
+    "/a?wid=" + ITEM, "/b?wid=" + ITEM, "/c?wid=" + ITEM, "/d?wid=" + ITEM,
+    "/e?wid=MLB7777777777", "/f?wid=MLB7777777777", "/g?wid=MLB7777777777"
+  ])));
+
+testar("item na pagina: sem link com item, nao inventa", null,
+  codigoDoItemNaPagina(paginaComLinks(["/", "/caixas", "/kit-2-caixa/up/MLBU0000000001"])));
 
 console.log("");
 console.log("=== leitor do diagnostico (lote 28c) ===");

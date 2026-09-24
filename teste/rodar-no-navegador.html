@@ -525,6 +525,25 @@
     testar("popup: o relatorio nao leva os numeros de cada dia", -1,
       textoDoRelatorio.indexOf("marcador-do-historico"));
 
+    // --- 8b. Painel na vitrine /up/, com o item achado na pagina (lote 29) --
+    // O caso da primeira instalacao: a URL so tem o codigo MLBU do caminho, e
+    // o cache guarda o codigo do ITEM. Sem achar o item dentro da pagina, o
+    // painel nunca apareceria nesta tela.
+    const armazemVitrine = {
+      mlmetrics_dados: { MLB3456789012: registroComOrigem(359, 50) }
+    };
+    const vitrine = await abrirFixture(
+      "/kit-2-caixa/up/MLBU0000000001",
+      armazemVitrine,
+      SCRIPTS_PAINEL
+    );
+    await esperar(900);
+
+    testar("#38: painel aparece na vitrine /up/ pelo item achado nos links", "359",
+      valorDaLinha(vitrine.documento, "Visitas"));
+    testar("#38: e nada e capturado nessa vitrine", "MLB3456789012",
+      Object.keys(armazemVitrine.mlmetrics_dados).join(","));
+
     // --- 9. Aviso de tela que parou e conferencia (lote 27) ----------------
     const avisoDeTela = popup.documento.getElementById("telas");
 

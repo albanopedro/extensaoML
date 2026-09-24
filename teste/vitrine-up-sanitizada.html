@@ -39,18 +39,35 @@
       <button class="comprar">Comprar agora</button>
       <button class="adicionar">Adicionar ao carrinho</button>
     </section>
+
+    <!--
+      O codigo do ITEM so existe DENTRO da pagina: a URL desta rota
+      (/kit-2-caixa/up/MLBU0000000001) nao tem nenhum. Nas paginas reais, o
+      item da pagina se repete em dezenas de links (aqui, 5 vezes, o
+      suficiente para a regra de dominancia) enquanto cada produto
+      recomendado aparece uma vez so - por isso os cards de "Mais vendidos"
+      abaixo tem um wid cada. Ver codigoDoItemNaPagina no calculo.js.
+      Codigos ficticios.
+    -->
+    <section class="acoes-do-item">
+      <a href="/kit-2-caixa/up/MLBU0000000001?pdp_filters=item_id%3AMLB3456789012">Ver mais detalhes</a>
+      <a href="/compra?wid=MLB3456789012&amp;quantity=1">Comprar</a>
+      <a href="/carrinho?wid=MLB3456789012">Adicionar ao carrinho</a>
+      <a href="/perguntas?pdp_filters=item_id%253AMLB3456789012">Perguntar ao vendedor</a>
+      <a href="/opinioes?pdp_filters=item_id%3AMLB3456789012">Opiniões do produto</a>
+    </section>
     <section class="mais-vendidos">
       <h2>Mais vendidos</h2>
       <div class="card">
-        <a href="https://www.mercadolivre.com.br/organizador-de-gavetas/p/MLB0000000002">Organizador de gavetas</a>
+        <a href="https://www.mercadolivre.com.br/organizador-de-gavetas/p/MLB0000000002?wid=MLB0000000012">Organizador de gavetas</a>
         <span>+100 vendidos</span>
       </div>
       <div class="card">
-        <a href="https://www.mercadolivre.com.br/estojo-organizador/p/MLB0000000003">Estojo organizador</a>
+        <a href="https://www.mercadolivre.com.br/estojo-organizador/p/MLB0000000003?wid=MLB0000000013">Estojo organizador</a>
         <span>+25 vendidos</span>
       </div>
       <div class="card">
-        <a href="https://www.mercadolivre.com.br/caixa-plastica-transparente/p/MLB0000000004">Caixa plástica transparente</a>
+        <a href="https://www.mercadolivre.com.br/caixa-plastica-transparente/p/MLB0000000004?wid=MLB0000000014">Caixa plástica transparente</a>
         <span>+1.000 vendidos</span>
       </div>
     </section>

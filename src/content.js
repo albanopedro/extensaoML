@@ -33,6 +33,10 @@
   // pagina (F5) mostra o painel de novo.
   let fechadoPara = null;
 
+  // Ultimo codigo de item achado dentro da pagina, e em qual endereco (ver
+  // itemDestaPagina).
+  let itemAchado = { href: null, codigo: null };
+
   // --------------------------------------------------------------------------
   // Leitura
   // --------------------------------------------------------------------------
@@ -46,7 +50,41 @@
    */
   function chaveDaPagina() {
     const codigos = MLMetricsCalculo.codigosDaPagina(window.location.href);
-    return codigos.length > 0 ? codigos.join("|") : null;
+
+    // Nenhum codigo na URL: nao e pagina de anuncio (home, busca, "Minhas
+    // publicacoes"). Nao procuramos codigo DENTRO dela - uma tela de lista
+    // tem dezenas, e o painel nao tem o que mostrar ali.
+    if (codigos.length === 0) return null;
+
+    // Em rota /up/MLBU... e /p/MLB... o codigo da URL nao e o do item, que e
+    // o que o cache guarda. O do item costuma estar nos links da propria
+    // pagina (ver codigoDoItemNaPagina) e, quando aparece, vem primeiro.
+    const doItem = itemDestaPagina();
+
+    return (doItem && codigos.indexOf(doItem) === -1)
+      ? [doItem].concat(codigos).join("|")
+      : codigos.join("|");
+  }
+
+  /**
+   * O codigo do item desta pagina, guardado entre chamadas.
+   *
+   * O poller chama chaveDaPagina a cada segundo, e a busca percorre os links
+   * da pagina. Guardar o resultado por endereco evita repetir isso o tempo
+   * todo. Resultado nulo NAO e guardado: os links do ML chegam depois do
+   * primeiro desenho, e a proxima chamada tenta de novo.
+   *
+   * @returns {string|null}
+   */
+  function itemDestaPagina() {
+    if (itemAchado.href !== window.location.href || itemAchado.codigo === null) {
+      itemAchado = {
+        href: window.location.href,
+        codigo: MLMetricsCalculo.codigoDoItemNaPagina(document)
+      };
+    }
+
+    return itemAchado.codigo;
   }
 
   /**

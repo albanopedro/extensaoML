@@ -104,7 +104,13 @@ function criarServidor() {
     "/anuncios/lista": "publicacoes.html",
     "/vendas/lista": "publicacoes.html",
     "/MLB-1111111111-caixa-organizadora": "MLB-1111111111-anuncio.html",
-    "/pagina-pesada": paginaRealSalva()
+    // Vitrine nova: o endereco so tem o codigo MLBU do caminho, e o do item
+    // esta dentro da pagina (lote 29).
+    "/kit-2-caixa/up/MLBU0000000001": "vitrine-up-sanitizada.html",
+    "/pagina-pesada": paginaRealSalva(),
+    // A mesma pagina real, num endereco com a forma /up/: e nela que se prova
+    // o caso que apareceu na instalacao do Pedro.
+    "/vitrine-real/up/MLBU0000000099": paginaRealSalva()
   };
 
   return https.createServer({
@@ -344,6 +350,81 @@ async function verificar() {
       await navegador.rodar(anuncio.sessao,
         "return document.getElementById('mlmetrics-painel');"));
 
+    // --- Vitrine /up/: o painel pelo item achado na pagina (lote 29) -------
+    // Nessa rota a URL so tem o codigo MLBU; o cache guarda o do ITEM. Sem
+    // procurar o item dentro da pagina, o painel nunca apareceria - foi o que
+    // aconteceu na primeira instalacao (24/09/2026).
+    await navegador.rodar(sw.sessao, `
+      const agora = Date.now();
+      const g = await chrome.storage.local.get("mlmetrics_dados");
+      const cache = g.mlmetrics_dados || {};
+      cache.MLB3456789012 = {
+        visitas: 359, vendas: 50, capturadoEm: agora,
+        origem: {
+          visitas: { trecho: "«359 visitas»", tela: "/anuncios/lista", em: agora },
+          vendas: { trecho: "«50 vendas»", tela: "/anuncios/lista", em: agora }
+        }
+      };
+      await chrome.storage.local.set({ mlmetrics_dados: cache });
+      return true;
+    `);
+
+    const vitrine = await navegador.abrirAba(
+      "https://www.mercadolivre.com.br/kit-2-caixa/up/MLBU0000000001");
+
+    testar("vitrine /up/: painel aparece pelo item achado nos links da página", true, await ate(
+      function () {
+        return navegador.rodar(vitrine.sessao, `
+          const p = document.getElementById("mlmetrics-painel");
+          return Boolean(p) && p.textContent.indexOf("359") !== -1;
+        `);
+      },
+      function (tem) { return tem === true; }
+    ));
+
+    await navegador.fecharAba(vitrine);
+
+    // O mesmo caso, agora na PAGINA REAL salva (fora do repositorio): lemos o
+    // codigo do item pela propria extensao, semeamos o cache com ele e vemos
+    // o painel aparecer. Nenhum codigo real e impresso.
+    if (!paginaRealSalva()) {
+      console.log("PULADO | vitrine real: nenhuma página real salva em teste/");
+    } else {
+      const real = await navegador.abrirAba(
+        "https://www.mercadolivre.com.br/vitrine-real/up/MLBU0000000099");
+      await esperar(1200);
+
+      const codigo = await navegador.rodarNaExtensao(real, "ML Metrics",
+        "return MLMetricsCalculo.codigoDoItemNaPagina(document);");
+
+      testar("vitrine real: o código do item é achado dentro da página", true,
+        /^MLB[A-Z]?\d{6,}$/.test(String(codigo)));
+
+      await navegador.rodar(sw.sessao, `
+        const agora = Date.now();
+        const g = await chrome.storage.local.get("mlmetrics_dados");
+        const cache = g.mlmetrics_dados || {};
+        cache[${JSON.stringify(codigo)}] = {
+          visitas: 412, capturadoEm: agora,
+          origem: { visitas: { trecho: "«412 visitas»", tela: "/anuncios/lista", em: agora } }
+        };
+        await chrome.storage.local.set({ mlmetrics_dados: cache });
+        return true;
+      `);
+
+      testar("vitrine real: com o número capturado, o painel aparece nela", true, await ate(
+        function () {
+          return navegador.rodar(real.sessao, `
+            const p = document.getElementById("mlmetrics-painel");
+            return Boolean(p) && p.textContent.indexOf("412") !== -1;
+          `);
+        },
+        function (tem) { return tem === true; }
+      ));
+
+      await navegador.fecharAba(real);
+    }
+
     // --- Popup de verdade: itens 9, 6, 11 e 4 ------------------------------
     const popup = await navegador.abrirAba("chrome-extension://" + sw.id + "/src/popup.html");
     await esperar(900);
@@ -442,8 +523,23 @@ async function verificar() {
         return Math.round(Math.min(...tempos));
       `);
 
+      // O painel procura o codigo do item nos links da pagina a cada troca de
+      // endereco (ver codigoDoItemNaPagina): entra na conta tambem.
+      const itemNaPagina = await navegador.rodarNaExtensao(aba, "ML Metrics", `
+        const tempos = [];
+        for (let i = 0; i < 3; i++) {
+          const inicio = performance.now();
+          MLMetricsCalculo.codigoDoItemNaPagina(document);
+          tempos.push(performance.now() - inicio);
+        }
+        return Math.round(Math.min(...tempos));
+      `);
+
       console.log("       (pagina de " + Math.round(tamanho / 1024) + " KB: portao " +
-        portao + " ms, varredura completa " + varredura + " ms)");
+        portao + " ms, varredura completa " + varredura + " ms, item nos links " +
+        itemNaPagina + " ms)");
+
+      testar("custo: achar o item nos links fica abaixo de 100 ms", true, itemNaPagina < 100);
 
       // Medido em 22/09/2026 nesta pagina de 888 KB: portao 3 ms, varredura
       // completa 7 ms. Os limites sao folgados de proposito (maquina ocupada
