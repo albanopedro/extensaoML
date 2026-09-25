@@ -3,7 +3,7 @@
 > Cole este arquivo inteiro no início de uma nova conversa. Ele contém tudo que é
 > preciso saber para continuarmos corrigindo os problemas sem refazer a análise.
 >
-> **Atualizado em 24/09/2026, depois do lote 29 (painel achando o item dentro da página).** O que falta fazer está
+> **Atualizado em 25/09/2026, depois do lote 30 (o popup contando o que há na aba).** O que falta fazer está
 > na **seção 5**. O que já foi feito está resumido e sinalizado na **seção 6**.
 
 ---
@@ -42,7 +42,7 @@ envolvido → propõe a correção → aplicamos.**
 - **Sem acentos nos comentários de código** (o projeto segue isso). Em texto de
   interface exibido para a usuária, acentos normais.
 - **Antes de corrigir, confirme a linha.** Os números de linha da seção 5 valem para o
-  estado do código em **24/09/2026, depois do lote 29**. Depois de cada correção eles
+  estado do código em **25/09/2026, depois do lote 30**. Depois de cada correção eles
   saem do lugar.
 - **Toda correção entra com caso de teste**: no harness (`node teste/test-parsing.js`)
   quando a função for testável fora do navegador; na página de teste
@@ -64,7 +64,7 @@ envolvido → propõe a correção → aplicamos.**
 (visitas, vendas, conversão, receita estimada) nos anúncios do Mercado Livre de uma
 vendedora.
 
-Caminho: `C:\codes\extensaoML` · versão no manifest: **0.2.3**
+Caminho: `C:\codes\extensaoML` · versão no manifest: **0.2.4**
 
 **Restrição central do projeto:** a API pública do Mercado Livre devolve 403 e
 exigiria OAuth ou cookie de sessão. Por isso a extensão **raspa a tela** em vez de
@@ -114,7 +114,7 @@ extensaoML/
 │   │                               carrega leitura/diagnostico/calculo/gravacao
 │   │                               como sao, o service worker e a ordem do manifest.
 │   ├── servidor-teste.js           Servidor local (127.0.0.1, lista fechada).
-│   ├── rodar-no-navegador.html     Teste em DOM real (59 casos, 59/59 PASS).
+│   ├── rodar-no-navegador.html     Teste em DOM real (65 casos, 65/65 PASS).
 │   ├── ler-diagnostico.js          Resume o que a cliente colar (diagnostico
 │   │                               ou conferencia) e diz o que aquilo decide.
 │   ├── abrir-demo.js               Abre o Edge com a extensao instalada e as
@@ -217,6 +217,11 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
      falhou ao ler uma tela, quando foi, e manda copiar o diagnóstico (lote 24).
    - **Aviso laranja** quando existe `mlmetrics_telas_falhando`: uma tela que já trazia
      números parou de trazer, desde quando, e o que fazer (lote 27).
+   - **Situação da aba** (lote 30): ao abrir, o popup pergunta à aba ativa e mostra uma
+     linha azul dizendo o que há nela — aba do ML sem extensão ("aperte F5"), página de
+     produto, tela de vendedor com N anúncios lidos, ou tela sem número ("copie o
+     diagnóstico"). A URL da aba só é visível no domínio do ML (`host_permissions`), e é
+     isso que separa "aba órfã" de "você não está no Mercado Livre".
    - **Conferência** (lote 27): cada anúncio com número conferível ganha "✓ bate" e
      "✗ não bate"; a marca vai para `mlmetrics_conferencia` (sobrevive ao popup fechar)
      e clicar de novo desmarca. **"Copiar conferência"** monta o texto pronto, com o
@@ -260,11 +265,12 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
 | Pedido do Pedro (21/09) — lote 27 | ✅ **conferência num clique** (marca "bate"/"não bate" por anúncio, gravada, e "Copiar conferência" com o texto pronto) e **aviso de tela que parou de entregar números** (laranja no popup, quando uma tela que já funcionou deixa de entregar). |
 | Pedido do Pedro (21/09) — lote 28 | ✅ **verificação no Edge automatizada**: `node teste/verificar-no-edge.js` sobe o Edge com a extensão instalada e roda os 11 itens da antiga lista manual (**21/21**). Provado com defeito de propósito: quebrando o `extensaoViva` do `content.js`, o item do script órfão reprova. |
 | Instalação do Pedro (24/09) — lote 29 | ✅ **painel aparecia em anúncio nenhum** numa rota `/up/MLBU…`: a URL só tem o código de user product, e o cache guarda o do ITEM — nunca casavam. Agora o painel procura o código do item **nos links da própria página** (`codigoDoItemNaPagina`), por dominância. Provado na página real salva. |
+| Pedido do Pedro (25/09) — lote 30 | ✅ **o popup conta o que há na aba aberta**: aba do ML que não responde pede F5 (o tropeço que o próprio Pedro viveu em 24/09), página de produto explica que ali não se captura, tela de vendedor diz quantos anúncios está lendo — ou pede o diagnóstico quando não achou nada. |
 | Revisão 1 — resíduo #21 | ✅ corrida entre abas resolvida no lote 22 (gravação única no service worker). |
 | Harness | **289/289 PASS** (+6 no lote 29: o código do item achado nos links da página — dominância, wid, codificação dupla e os casos em que não dá para afirmar). `node --check` ok em todos os JS. |
 | Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **57/57 PASS** (+8 no lote 27: aviso laranja no popup; marcar, copiar e desmarcar a conferência; tela conhecida que parou vira aviso; tela desconhecida não; tela que voltou a entregar sai do aviso). Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
 | Verificação no Edge | ✅ **27/27 PASS** (lote 28): extensão instalada de verdade, a partir do ZIP de `dist/`. Cobre os 11 itens da lista manual e mede o custo da leitura numa página real salva — **888 KB: 3 ms no portão, 7 ms na varredura completa** (22/09). |
-| Pacote | `dist\ML-Metrics-0.2.3.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
+| Pacote | `dist\ML-Metrics-0.2.4.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
 
 ### ⚠️ Repositório público — decisão do Pedro
 
@@ -331,7 +337,7 @@ Os itens, todos cobertos pelo comando acima:
    trecho de cada um.
 8. **#21** — com duas telas de vendedor abertas em abas diferentes (F5 nas duas), o
    popup lista os anúncios das duas; nenhuma apaga o que a outra gravou.
-9. **Popup** — o título mostra "ML Metrics v0.2.3".
+9. **Popup** — o título mostra "ML Metrics v0.2.4".
 10. **Histórico (lote 26)** — depois de capturar numa tela de vendedor, "Copiar
     diagnóstico": `historico.anuncios` > 0 e `historico.ultimoDia` = hoje. Em
     `edge://extensions` → Detalhes da ML Metrics, a extensão aceita a permissão nova
@@ -343,10 +349,10 @@ Os itens, todos cobertos pelo comando acima:
 
 ### Ação pendente (depois da verificação)
 
-1. Enviar `dist\ML-Metrics-0.2.3.zip` à cliente, com o texto do
+1. Enviar `dist\ML-Metrics-0.2.4.zip` à cliente, com o texto do
    **`MENSAGEM-CLIENTE.md`** (instalação em 4 passos e as 3 coisas que precisam voltar).
 2. A cliente segue **"Depois de uma atualização"** do guia: substituir os arquivos na
-   mesma pasta, recarregar a extensão, conferir a versão **0.2.3** (também no popup),
+   mesma pasta, recarregar a extensão, conferir a versão **0.2.4** (também no popup),
    **F5** nas abas do ML.
 3. A cliente clica **"Limpar dados guardados"** (agora apaga também as origens
    envenenadas pelo build antigo).
@@ -391,7 +397,7 @@ de vendedor (nunca vista — ver "Maior risco aberto" na seção 4):
 | # | Sev. | Título | Status | Depende da tela real? | Lote |
 |---|---|---|---|---|---|
 | #47 | MÉDIO | Período (7/30 dias) não é registrado junto do rastro (observer resolvido no lote 21; o período já vem no diagnóstico desde o lote 23a) | ⚠️ parcial | Sim (período) | 23b |
-| — | — | **Exibir vendas/mês e faturamento/mês** a partir do histórico diário (a gravação já existe desde o lote 26) | ⬜ | Sim — conferência dos 3 anúncios **e** #47 | 30 |
+| — | — | **Exibir vendas/mês e faturamento/mês** a partir do histórico diário (a gravação já existe desde o lote 26) | ⬜ | Sim — conferência dos 3 anúncios **e** #47 | 31 |
 | — | — | Decisão: religar a busca automática? | ⬜ | Sim (o HTML buscado traz os números?) | — |
 
 Nenhuma das três tem como avançar sem o `telaAtual.periodo`/`telaAtual` de uma tela de
@@ -413,7 +419,7 @@ código**: são decisões e ações do Pedro fora do repositório/extensão em s
 | # | Sev. | Título | Status | Quem resolve |
 |---|---|---|---|---|
 | #50 | MÉDIO | Privacidade no repositório GitHub (resíduo: repo público + histórico) | ⚠️ parcial | Pedro (GitHub) |
-| — | — | Enviar a 0.2.3 à cliente (commits em dia; a verificação virou `node teste/verificar-no-edge.js`) | ⬜ | Pedro |
+| — | — | Enviar a 0.2.4 à cliente (commits em dia; a verificação virou `node teste/verificar-no-edge.js`) | ⬜ | Pedro |
 
 ---
 
@@ -659,6 +665,19 @@ e conferir 11 itens na mão.
 | Custo da leitura | A verificação no Edge passou a medir, **dentro do mundo isolado da extensão** (`rodarNaExtensao`), quanto custa ler uma página real salva em `teste/` — as que têm dado da cliente e ficam fora do repositório. Em 888 KB: **3 ms** no portão (`paginaMencionaVisita`, que roda a cada lote de mutações em qualquer página do ML) e **7 ms** na varredura completa (com um rótulo plantado, já que a página salva é vitrine). Limites de 100 ms e 500 ms, para pegar regressão grande sem falhar em máquina ocupada. Sem página salva, o caso é **pulado**, não falha. → **23/23**. |
 | Mensagem pronta | `MENSAGEM-CLIENTE.md`: o texto para mandar junto com o zip (instalar em 4 passos, e depois diagnóstico + conferência dos 3 anúncios), mais a lista do que precisa voltar. Tira o atrito do passo que está travando o projeto. |
 
+### Lote 30 — o popup contando o que há na aba (25/09/2026)
+
+Pedido do Pedro, depois de ele mesmo tropeçar: reinstalou a extensão, a aba do ML já
+estava aberta (sem extensão rodando nela) e o popup só dizia "nenhum anúncio capturado".
+Verdade, mas inútil — não dava para saber que faltava um F5.
+
+| Item | O que foi feito |
+|---|---|
+| Como funciona | Ao abrir, o popup chama o `pedirDiagnosticoDaAba` que já existia (agora devolvendo também a aba) e mostra uma linha azul no topo, decidida por `situacaoDaAba`. |
+| As frases | Aba do ML que não responde → **"aperte F5 nela"**; aba fora do ML → "abra uma página do Mercado Livre"; vitrine → "aqui a extensão não lê números, eles vêm de Minhas publicações"; tela de vendedor com captura → **"estou lendo N anúncio(s) nesta tela"**; tela de vendedor sem número → "clique em Copiar diagnóstico"; tela que nem fala em visitas → "abra Minhas publicações". |
+| Como separa órfã de "não é o ML" | A URL da aba só chega quando ela é do Mercado Livre — é o que o `host_permissions` deixa ver, sem pedir a permissão "tabs". |
+| Testes | Navegador +6 → **65/65**: o `chrome` falso ganhou uma aba de mentira (`{ url, resposta }`), e cada frase tem um caso. Harness **289/289** e Edge **27/27** seguem. `manifest.json` → **0.2.4**. |
+
 ### Lote 29 — o painel achando o item dentro da página (24/09/2026)
 
 Pedro instalou a extensão e abriu um anúncio real: **nada apareceu**. O popup dizia
@@ -769,7 +788,7 @@ tela real disser o que o número significa (#47), o histórico já estará lá, 
 | — | 26b — Chaves do storage num lugar só | — | ✅ | Feito em 18/09. |
 | — | 27 — Conferência num clique + aviso de tela que parou | — | ✅ | Feito em 21/09. |
 | — | 28 — Verificação no Edge automatizada | — | ✅ | Feito em 21/09. Só `teste/`. |
-| 1 | **Enviar a 0.2.3 + decisão do repositório** | #50 | ⬜ | Seção 4. O commit e a verificação dos 11 itens já estão resolvidos (lote 28). |
+| 1 | **Enviar a 0.2.4 + decisão do repositório** | #50 | ⬜ | Seção 4. O commit e a verificação dos 11 itens já estão resolvidos (lote 28). |
 | 2 | **★ Ação — capturar "Minhas publicações" real + conferência de 3 anúncios** | — | ⬜ | "Copiar diagnóstico" na tela (`telaAtual`, com `resumoDasRecusas`) e passo 7 do guia. Decide #47 e valida #38, #48 e #57. |
 | 3 | **23b — Período no rastro** | #47 | ⬜ | Com o `telaAtual.periodo` da tela real, registrar o recorte (7/30 dias) junto do rastro. |
 | 4 | **Decisão — religar a busca automática?** | — | ⬜ | Só se a tela real mostrar que o HTML buscado traz os números. |
@@ -833,7 +852,7 @@ paramos.
 | 21 — Robustez geral | ✅ feito | 15/09/2026 | Relato da cliente: "no anúncio aparecem só as visitas". Verificado no Node que a regra do #37 da 0.1.3 perdia vendas em texto corrido ("359 visitas 12 vendas") e gravava número errado ("… 12 vendas 5 disponíveis" → 5), além de aceitar "R$ 49" e "+1.000". **#57:** `lerRotulo` por fila de peças coladas (pontas decidem antes/depois; ambíguo recusa; recusa para de subir). **#58:** `motivoDoNumero` (preço, faixa +N, data, hora, decimal, %, período, mil, ano). **#59:** recusas com motivo no diagnóstico (`resumoDasRecusas`, `recusas`) e amostras por métrica. **#60:** preço só estruturado (meta ou JSON-LD). **#61:** idade por calendário, "13,9%", `lastError` lido. **#49:** SW valida remetente, https + domínio (também após redirect) e tem timeout. **#54 / #38 (exibição):** `codigosDaPagina` + `escolherRegistro`. **#47 (observer):** `characterData`, `href`, `every`. **#53:** extração que ignora comentário, string e regex. Guia: o diagnóstico explica recusas. Fixtures: comentários corrigidos, gabarito "13,9%". Harness **159/159**. **DOM real** (servidor local, `chrome` falso): gabarito exato; irmãos "359 visitas 12 vendas 5 disponíveis" → 359/12; "Estoque: 5 \| Vendas" recusado com motivo; painel 13,9%; receita "—" sem preço estruturado; item do `pdp_filters` escolhido. `manifest.json` → **0.1.4**, zip gerado. |
 | 22 — Tudo que não dependia da tela real | ✅ feito | 15/09/2026 | Pedido do Pedro: "pode fazer tudo". **Limite de custo:** `LIMITE_TEXTO_POR_NIVEL = 5000` em `valorDoRotulo` (medido ~7 ms por leitura em bloco de 100 mil caracteres). **#21:** `src/gravacao.js` (regra pura de mesclar, carregada no SW e nas abas) + fila única no `background.js` (`gravarNaFila`, mensagem "salvar"); o coletor manda gravar e, sem resposta, grava na aba (`gravarNestaAba`); `comCache` e a mesclagem saíram do coletor. **#38:** `codigosDentroDe` prefere o item quando o card também tem link de catálogo/user product. **#40 (decisão):** `anotarImplausiveis` não descarta; `calcular.vendasAcimaDasVisitas`; alerta no painel. **#46 (decisão):** sem painel "Sem dados" (`montarPainelVazio` removido). **Busca automática (decisão):** `BUSCA_AUTOMATICA_LIGADA = false`; guia: a extensão não faz nada sozinha. **Popup:** versão ao lado do nome. **#53:** harness com `gravacao.js` e service worker (três gravações simultâneas, remetente alheio, busca fora do ML e sem https) → **191/191**; teste em DOM real versionado (`teste/servidor-teste.js`, `teste/rodar-no-navegador.html`) → **31/31**. `manifest.json` → **0.1.5** (content_scripts com `gravacao.js`), zip gerado. |
 | 23a — Período no diagnóstico | ✅ feito | 15/09/2026 | Pedido do Pedro: preparar o diagnóstico para o #47. `telaAtual.periodo` (e `mlmetrics_diagnostico.periodo`): textos curtos de filtro de período (`ehTextoDePeriodo`, vocabulário fechado), com `marcado` pela opção de `<select>`, radio/checkbox do `<label>` ou `aria-selected/checked/pressed/current` (`estadoDoControle`); intervalo de datas também no valor de campo (sem campo escondido, senha, e-mail ou telefone); até 20, sem repetição, sem o painel. Só leitura: gravação e painel não mudam. Guia: o diagnóstico traz o período. Harness **221/221**; navegador **37/37** (controles reais). `manifest.json` → **0.1.6**, zip gerado. |
-| Enviar a 0.2.3 + repositório | ⬜ a fazer | | Seção 4 (Pedro). Commit e verificação já saíram do caminho. |
+| Enviar a 0.2.4 + repositório | ⬜ a fazer | | Seção 4 (Pedro). Commit e verificação já saíram do caminho. |
 | 0.1.7 — robustez (Pedro) | ✅ feito | 15/09/2026 | Commit `2fedda6`, direto por ele: tempo limite do plano B, `ehData` por calendário, `try/catch` no `new URL`, `lastError.message`. Entrou sem teste e sem registro — dívida paga no lote 24. |
 | 24 — Erro visível | ✅ feito | 17/09/2026 | Pedido do Pedro ("o que dá para melhorar"). **Falha silenciosa:** `coletar()` e o diagnóstico em `try/catch`; `registrarErro` grava `mlmetrics_erro` (onde, mensagem, 3 linhas de pilha, host, tela mascarada, hora, versão) com trava de 1 min; aviso vermelho no popup e `ultimoErro` no relatório. **Dívida da 0.1.7:** `motivoDoNumero` recusa a forma de data com ponto — sem isso, `31.04.2023` virava 31.042.023 visitas. Harness **231/231**, navegador **42/42**. `manifest.json` → **0.1.8**, zip gerado. |
 | 25 — `coletor.js` dividido | ✅ feito | 17/09/2026 | Pedido do Pedro (itens 2 e 3 das melhorias). `leitura.js` (`MLMetricsLeitura`), `diagnostico.js` (`MLMetricsDiagnostico`) e `calculo.js` (`MLMetricsCalculo`) saíram de `coletor.js` (2.015 → 696) e `content.js` (747 → 435), com o texto exato de cada função movido por script e as chamadas entre arquivos prefixadas. `diagnosticarTelaAtual()` → `diagnosticarTela(doc, local)`. Manifest na ordem de dependência. Harness sem extrator (`carregarModulo`), +6 casos da ordem do manifest → **237/237**; navegador **42/42**. Os quatro `var` da 0.1.7 → `const`/`let`. `manifest.json` → **0.1.9**, zip gerado. |
@@ -845,6 +864,7 @@ paramos.
 | 28c — Leitor do diagnóstico | ✅ feito | 24/09/2026 | Pedido do Pedro. `teste/ler-diagnostico.js`: lê o JSON do "Copiar diagnóstico" ou o texto do "Copiar conferência" e resume, terminando em "O QUE ISSO DECIDE" (período/#47, vitrine, tela sem "visita", recusas por motivo, conferência que não bateu, versão antiga). `.gitignore` cobrindo os arquivos colados. Harness **283/283**. Nada em `src/`. |
 | 29 — Item achado na página | ✅ feito | 24/09/2026 | Pedro instalou e não apareceu painel num anúncio `/up/MLBU…`: a URL não tem código de item e o cache só guarda item. `codigoDoItemNaPagina` (`calculo.js`) acha o item nos links da página por dominância (≥3 e 3× o segundo; senão `null`), e `chaveDaPagina` o põe na frente. Fecha a metade da exibição do #38. Harness **289/289**, navegador **59/59**, Edge **27/27** (inclusive na página real salva). `manifest.json` → **0.2.3**. |
 | 29b — Demonstração no Edge | ✅ feito | 24/09/2026 | `node teste/abrir-demo.js`: Edge com janela, extensão instalada e as telas de teste no endereço de verdade, para ver e clicar sem conta de vendedor. O servidor das fixtures virou `teste/servidor-ml-falso.js`, compartilhado com a verificação (que seguiu **27/27** depois da mudança). Nada em `src/`. |
-| 30 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
-| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.3: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
+| 30 — Popup conta a aba | ✅ feito | 25/09/2026 | Pedido do Pedro, depois de viver o tropeço: aba aberta antes do reload fica sem extensão e o popup não dizia nada. Agora ele pergunta à aba ao abrir (`situacaoDaAba`) e mostra uma linha azul: F5, página de produto, "lendo N anúncios", "copie o diagnóstico" ou "abra Minhas publicações". Navegador **65/65**, harness **289/289**, Edge **27/27**. `manifest.json` → **0.2.4**. |
+| 31 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
+| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.4: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |

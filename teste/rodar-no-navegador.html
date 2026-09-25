@@ -126,6 +126,20 @@
       }
     };
 
+    // Aba ativa de mentira, para o popup ter o que perguntar (ver
+    // situacaoDaAba no popup.js). { url, resposta } - sem resposta, a aba
+    // "nao responde", que e o caso da aba orfa.
+    if (opcoes && opcoes.aba) {
+      falso.tabs = {
+        query: function (_, callback) {
+          setTimeout(function () { callback([{ id: 1, url: opcoes.aba.url }]); }, 0);
+        },
+        sendMessage: function (id, mensagem, extra, callback) {
+          setTimeout(function () { callback(opcoes.aba.resposta); }, 0);
+        }
+      };
+    }
+
     // sendMessage MUDO: o service worker recebe e nunca responde - o
     // navegador pode derruba-lo no meio da fila. Sem o tempo limite do plano
     // B (TIMEOUT_PLANO_B_MS, 0.1.7), a leitura ficaria sem ninguem que a
@@ -189,10 +203,10 @@
    * aberto como srcdoc, com uma linha na frente que pega o chrome falso do
    * teste e um <base> para os scripts continuarem sendo os arquivos de src/.
    */
-  async function abrirPopup(armazem) {
+  async function abrirPopup(armazem, opcoes) {
     const resposta = await fetch("/src/popup.html?t=" + Date.now());
     const html = await resposta.text();
-    const falso = chromeFalso(armazem);
+    const falso = chromeFalso(armazem, opcoes);
 
     window.chromeDoPopup = falso;
 
@@ -573,6 +587,56 @@
 
     testar("popup: clicar de novo desmarca", undefined,
       (armazemPopup.mlmetrics_conferencia || {}).MLB1111111111);
+
+    // --- 9b. O popup dizendo o que ha na aba aberta (lote 30) --------------
+    // Cada caso abre um popup proprio: a frase e decidida na hora em que ele
+    // abre, perguntando a aba.
+    async function fraseDaAba(aba) {
+      const popupDaVez = await abrirPopup({}, { aba: aba });
+      await esperar(500);
+
+      const caixa = popupDaVez.documento.getElementById("aba");
+      return caixa.hidden ? "" : caixa.textContent;
+    }
+
+    testar("popup: aba do ML que não responde manda apertar F5", true,
+      /Aperte F5/.test(await fraseDaAba({
+        url: "https://www.mercadolivre.com.br/anuncios/lista",
+        resposta: undefined
+      })));
+
+    testar("popup: fora do Mercado Livre, convida a abrir uma página dele", true,
+      /Abra uma página do Mercado Livre/.test(await fraseDaAba({
+        url: undefined,
+        resposta: undefined
+      })));
+
+    testar("popup: em página de produto, explica que ali não se captura", true,
+      /página de produto/.test(await fraseDaAba({
+        url: "https://produto.mercadolivre.com.br/MLB-1111111111-caixa",
+        resposta: { vitrine: true, mencionaVisita: false, capturariaAgora: null }
+      })));
+
+    testar("popup: em tela de vendedor, diz quantos anúncios está lendo", true,
+      /lendo 2 anúncio/.test(await fraseDaAba({
+        url: "https://www.mercadolivre.com.br/anuncios/lista",
+        resposta: {
+          vitrine: false, mencionaVisita: true,
+          capturariaAgora: { MLB1111111111: {}, MLB2222222222: {} }
+        }
+      })));
+
+    testar("popup: tela de vendedor sem número pede o diagnóstico", true,
+      /Copiar diagnóstico/.test(await fraseDaAba({
+        url: "https://www.mercadolivre.com.br/anuncios/lista",
+        resposta: { vitrine: false, mencionaVisita: true, capturariaAgora: {} }
+      })));
+
+    testar("popup: tela que nem fala em visitas manda abrir Minhas publicações", true,
+      /Minhas publicações/.test(await fraseDaAba({
+        url: "https://www.mercadolivre.com.br/",
+        resposta: { vitrine: false, mencionaVisita: false, capturariaAgora: {} }
+      })));
 
     // --- 10. Tela conhecida que parou de entregar numeros ------------------
     const enderecoDoAnuncio = location.origin + "/teste/MLB-1111111111-anuncio.html";

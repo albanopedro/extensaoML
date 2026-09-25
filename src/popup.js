@@ -44,6 +44,7 @@
   const resumo = document.getElementById("resumo");
   const erro = document.getElementById("erro");
   const telas = document.getElementById("telas");
+  const caixaDaAba = document.getElementById("aba");
   const lista = document.getElementById("lista");
   const aviso = document.getElementById("aviso");
   const campoDiagnostico = document.getElementById("diagnostico");
@@ -459,29 +460,92 @@
     try {
       chrome.tabs.query({ active: true, currentWindow: true }, function (abas) {
         if (chrome.runtime.lastError || !abas || abas.length === 0) {
-          pronto(SEM_RESPOSTA);
+          pronto(SEM_RESPOSTA, null);
           return;
         }
 
+        const aba = abas[0];
+
         // frameId 0: so o documento principal - o coletor nao roda em iframes.
         chrome.tabs.sendMessage(
-          abas[0].id,
+          aba.id,
           { tipo: "diagnosticar" },
           { frameId: 0 },
           function (resposta) {
             // Ler o lastError e obrigatorio: "ninguem escutando" e o caso
             // comum aqui, e sem a leitura o navegador reclama no console.
             if (chrome.runtime.lastError || !resposta) {
-              pronto(SEM_RESPOSTA);
+              pronto(SEM_RESPOSTA, aba);
               return;
             }
-            pronto(resposta);
+            pronto(resposta, aba);
           }
         );
       });
     } catch (e) {
-      pronto(SEM_RESPOSTA);
+      pronto(SEM_RESPOSTA, null);
     }
+  }
+
+  /**
+   * Uma frase sobre a aba que esta aberta AGORA, para o topo do popup.
+   *
+   * Existe por causa do que aconteceu em 24/09/2026: a extensao foi
+   * recarregada, a aba do ML continuou aberta de antes e ali nao havia
+   * extensao nenhuma rodando. O popup dizia so "nenhum anuncio capturado" -
+   * verdade, mas inutil: nao dava para saber que faltava um F5. Agora ele
+   * pergunta a aba assim que abre e conta o que esta acontecendo nela.
+   *
+   * A URL da aba so chega quando ela e do Mercado Livre (e o que o
+   * host_permissions permite ver). E isso que separa "aba orfa, precisa de
+   * F5" de "voce nao esta numa pagina do Mercado Livre".
+   *
+   * @param {Object} resposta o diagnostico da aba, ou o objeto com "erro"
+   * @param {Object|null} aba a aba ativa (id e, no ML, url)
+   * @returns {string} frase, ou "" quando nao ha nada util a dizer
+   */
+  function situacaoDaAba(resposta, aba) {
+    const noMercadoLivre = Boolean(aba && aba.url &&
+      aba.url.indexOf("mercadolivre.com.br") !== -1);
+
+    if (resposta && resposta.erro) {
+      if (noMercadoLivre) {
+        return "Esta aba do Mercado Livre foi aberta antes da última " +
+          "atualização da extensão. Aperte F5 nela e abra este menu de novo.";
+      }
+      return "Abra uma página do Mercado Livre para eu olhar a tela.";
+    }
+
+    if (!resposta) return "";
+
+    if (resposta.vitrine) {
+      return "Esta é uma página de produto. A extensão não lê números aqui — " +
+        "eles vêm da tela \"Minhas publicações\".";
+    }
+
+    const quantos = Object.keys(resposta.capturariaAgora || {}).length;
+
+    if (quantos > 0) {
+      return "Estou lendo " + quantos + " anúncio(s) nesta tela.";
+    }
+
+    if (!resposta.mencionaVisita) {
+      return "Esta tela não mostra visitas. Abra \"Minhas publicações\" e " +
+        "espere a lista carregar até o fim.";
+    }
+
+    return "Passei por esta tela e não achei números. Clique em \"Copiar " +
+      "diagnóstico\" e mande o texto para o Pedro.";
+  }
+
+  /**
+   * Mostra (ou esconde) a frase sobre a aba aberta.
+   */
+  function mostrarSituacaoDaAba(resposta, abaAtiva) {
+    const frase = situacaoDaAba(resposta, abaAtiva);
+
+    caixaDaAba.hidden = frase === "";
+    caixaDaAba.textContent = frase;
   }
 
   // --------------------------------------------------------------------------
@@ -611,4 +675,9 @@
   }
 
   desenhar();
+
+  // Assim que o popup abre, perguntamos a aba ativa o que esta acontecendo
+  // nela (ver situacaoDaAba). E uma mensagem so, e a varredura do outro lado
+  // custa milissegundos.
+  pedirDiagnosticoDaAba(mostrarSituacaoDaAba);
 })();
