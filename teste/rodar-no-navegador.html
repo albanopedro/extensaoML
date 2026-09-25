@@ -580,6 +580,24 @@
     testar("página de produto: nada é gravado no storage", 0,
       Object.keys(armazemVazio).length);
 
+    // Anuncio com muita venda: o ML arredonda ("Novo | +25 vendidos"). O
+    // numero e PISO, e o painel precisa dizer isso - sem o "+", 25 viraria
+    // total exato aos olhos de quem le.
+    const aproximada = await abrirFixture(
+      "/kit-2-caixa/up/MLBU0000000001",
+      {},
+      SCRIPTS_PAINEL,
+      function (documento) {
+        documento.querySelector(".condicao").textContent = "Novo | +25 vendidos";
+      }
+    );
+    await esperar(900);
+
+    testar("página de produto: venda arredondada aparece com o +", "+25",
+      valorDaLinha(aproximada.documento, "Vendas"));
+    testar("página de produto: e a receita vira 'a partir de'", "a partir de R$ 497,50",
+      valorDaLinha(aproximada.documento, "Receita estimada"));
+
     // --- 9. Aviso de tela que parou e conferencia (lote 27) ----------------
     const avisoDeTela = popup.documento.getElementById("telas");
 

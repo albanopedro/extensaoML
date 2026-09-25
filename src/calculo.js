@@ -337,7 +337,12 @@ var MLMetricsCalculo = (function () {
       receita: temVendas && preco ? vendas * preco : null,
 
       // O painel mostra um alerta, em vez de esconder o anuncio.
-      vendasAcimaDasVisitas: acimaDasVisitas
+      vendasAcimaDasVisitas: acimaDasVisitas,
+
+      // "+25 vendidos" lido da pagina de produto: o numero e PISO, nao total
+      // (ver vendidosDaPagina no leitura.js). O painel escreve "+25" e trata
+      // a receita como "a partir de".
+      vendasAproximadas: Boolean(dados.vendasAproximadas)
     };
   }
 

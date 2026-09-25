@@ -141,7 +141,10 @@
 
     const preco = lerPreco();
     montarPainel(
-      MLMetricsCalculo.calcular({ vendas: vendidos.valor }, preco),
+      MLMetricsCalculo.calcular({
+        vendas: vendidos.valor,
+        vendasAproximadas: vendidos.aproximado
+      }, preco),
       agora,
       origem,
       preco,
@@ -288,10 +291,20 @@
       MLMetricsCalculo.explicarOrigem(origem.visitas)
     ));
 
+    // "+25 vendidos" na pagina quer dizer "mais de 25". O "+" fica no painel:
+    // sem ele, um numero que e piso viraria numero exato aos olhos de quem le.
+    const vendasEscritas = metricas.vendas !== null
+      ? (metricas.vendasAproximadas ? "+" : "") + metricas.vendas.toLocaleString("pt-BR")
+      : null;
+
     linhas.push(criarLinha(
       "Vendas",
-      metricas.vendas !== null ? metricas.vendas.toLocaleString("pt-BR") : null,
-      MLMetricsCalculo.explicarOrigem(origem.vendas)
+      vendasEscritas,
+      metricas.vendasAproximadas
+        ? "O Mercado Livre arredonda esse número nesta página: o total real é " +
+          "maior que " + metricas.vendas.toLocaleString("pt-BR") + ".\n" +
+          MLMetricsCalculo.explicarOrigem(origem.vendas)
+        : MLMetricsCalculo.explicarOrigem(origem.vendas)
     ));
 
     // As tres de baixo sao CALCULADAS, nao lidas. O title diz a conta, para
@@ -313,7 +326,10 @@
     let explicacaoReceita = null;
 
     if (metricas.receita !== null) {
-      explicacaoReceita = "Estimativa: vendas × preço atual desta página (" +
+      explicacaoReceita = (metricas.vendasAproximadas
+        ? "Piso: o número de vendas desta página é arredondado, então a receita " +
+          "real é maior. Conta: vendas × preço atual ("
+        : "Estimativa: vendas × preço atual desta página (") +
         MLMetricsCalculo.formatarReais(preco) + "). Não é o faturamento real: não considera " +
         "promoções, variações nem mudanças de preço.";
     } else if (metricas.vendas && !preco) {
@@ -326,7 +342,10 @@
 
     linhas.push(criarLinha(
       "Receita estimada",
-      metricas.receita !== null ? MLMetricsCalculo.formatarReais(metricas.receita) : null,
+      metricas.receita !== null
+        ? (metricas.vendasAproximadas ? "a partir de " : "") +
+          MLMetricsCalculo.formatarReais(metricas.receita)
+        : null,
       explicacaoReceita
     ));
 

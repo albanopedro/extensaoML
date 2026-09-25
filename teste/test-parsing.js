@@ -999,8 +999,35 @@ testar("vendidos: com o trecho de onde leu", true,
 testar("vendidos: so faixas arredondadas nao viram numero", null,
   vendidosDaPagina(paginaDeProduto(["+100 vendidos", "+10mil vendidos", "Mais vendidos"])));
 
-testar("vendidos: dois numeros exatos diferentes = ambiguo, nao mostra", null,
-  vendidosDaPagina(paginaDeProduto(["Novo | 2 vendidos", "9 vendidos na loja"])));
+// "+25 vendidos" no subtitulo do anuncio ("Novo | ...") e o proprio anuncio:
+// vale como PISO. Os "+N vendidos" soltos das vitrines nao tem condicao junto.
+const aproximado = vendidosDaPagina(paginaDeProduto([
+  "Novo | +25 vendidos", "+100 vendidos", "+50 vendidos", "Mais vendidos"
+]));
+
+testar("vendidos: subtitulo com faixa vale como piso", "25/true",
+  aproximado ? aproximado.valor + "/" + aproximado.aproximado : "nada");
+testar("vendidos: subtitulo exato nao e aproximado", "1/false", (function () {
+  const exato = vendidosDaPagina(paginaDeProduto(["Novo | 1 vendido", "+100 vendidos"]));
+  return exato ? exato.valor + "/" + exato.aproximado : "nada";
+})());
+testar("vendidos: milhar abreviado no subtitulo continua fora", null,
+  vendidosDaPagina(paginaDeProduto(["Novo | +10mil vendidos", "+100 vendidos"])));
+testar("vendidos: condicao usada tambem conta", 1000, (function () {
+  const usado = vendidosDaPagina(paginaDeProduto(["Usado | +1.000 vendidos", "+25 vendidos"]));
+  return usado ? usado.valor : null;
+})());
+
+const contaAproximada = calcular({ vendas: 25, vendasAproximadas: true }, 60);
+testar("vendidos: a conta marca a receita como piso", "1500/true",
+  contaAproximada.receita + "/" + contaAproximada.vendasAproximadas);
+
+testar("vendidos: dois numeros exatos e nenhum no subtitulo = ambiguo", null,
+  vendidosDaPagina(paginaDeProduto(["2 vendidos", "9 vendidos na loja"])));
+testar("vendidos: o subtitulo do anuncio vence outros numeros da pagina", 2, (function () {
+  const escolhido = vendidosDaPagina(paginaDeProduto(["Novo | 2 vendidos", "9 vendidos na loja"]));
+  return escolhido ? escolhido.valor : null;
+})());
 
 testar("vendidos: o painel da propria extensao e ignorado", null,
   vendidosDaPagina(documentoDa(elementoDa("body", {}, [

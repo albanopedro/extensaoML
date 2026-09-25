@@ -987,7 +987,14 @@ var MLMetricsLeitura = (function () {
       aceitarNoDeTextoTecnico
     );
 
-    const achados = [];
+    // O anuncio anuncia a propria condicao junto do total: "Novo | 1
+    // vendido", "Usado | +25 vendidos". Os produtos recomendados da mesma
+    // pagina aparecem como "+100 vendidos", sem condicao nenhuma - e e isso
+    // que separa um do outro. Conferido nas duas paginas reais salvas.
+    const SUBTITULO = /(novo|usado|recondicionado)[^\d+]{0,4}(\+?)\s*([\d.]+)\s*vendid[oa]s?/i;
+
+    const doSubtitulo = [];
+    const exatos = [];
     let no = caminhante.nextNode();
 
     while (no) {
@@ -1000,18 +1007,45 @@ var MLMetricsLeitura = (function () {
       // a palavra.
       if (!daExtensao && texto.length > 0 && texto.length < 120 &&
           /vendid[oa]s?/i.test(texto)) {
+        const subtitulo = texto.match(SUBTITULO);
+
+        if (subtitulo) {
+          const valor = paraInteiro(subtitulo[3]);
+
+          if (valor !== null && !doSubtitulo.some(function (achado) {
+            return achado.valor === valor && achado.aproximado === Boolean(subtitulo[2]);
+          })) {
+            doSubtitulo.push({
+              valor: valor,
+              // "+25 vendidos" quer dizer "mais de 25": o numero certo esta
+              // entre 25 e o proximo degrau. Mostrar 25 como exato seria
+              // mentira; o painel mostra "+25".
+              aproximado: Boolean(subtitulo[2]),
+              trecho: "«" + texto + "»"
+            });
+          }
+        }
+
         const leitura = lerRotulo(texto.toLowerCase(), "vendid");
 
         if (leitura && leitura.valor !== undefined &&
-            !achados.some(function (achado) { return achado.valor === leitura.valor; })) {
-          achados.push({ valor: leitura.valor, trecho: trechoDaLeitura(texto, leitura) });
+            !exatos.some(function (achado) { return achado.valor === leitura.valor; })) {
+          exatos.push({
+            valor: leitura.valor,
+            aproximado: false,
+            trecho: trechoDaLeitura(texto, leitura)
+          });
         }
       }
 
       no = caminhante.nextNode();
     }
 
-    return achados.length === 1 ? achados[0] : null;
+    // O subtitulo do anuncio vale mais que qualquer outro "vendido" da
+    // pagina. Sem ele, so um numero EXATO e unico serve.
+    if (doSubtitulo.length === 1) return doSubtitulo[0];
+
+    return exatos.length === 1 ? exatos[0] : null;
   }
 
   // --------------------------------------------------------------------------

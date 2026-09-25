@@ -1,12 +1,12 @@
 # Mensagem para mandar junto com a versão nova
 
-Anexo: `dist\ML-Metrics-0.2.6.zip`. O guia completo continua sendo o
+Anexo: `dist\ML-Metrics-0.2.7.zip`. O guia completo continua sendo o
 `INSTRUCOES-CLIENTE.md` — esta mensagem é o resumo do que ela precisa fazer
 agora. Copie daqui para baixo.
 
 ---
 
-Oi! Mandei a versão nova da extensão (0.2.6), em anexo. São uns 5 minutos.
+Oi! Mandei a versão nova da extensão (0.2.7), em anexo. São uns 5 minutos.
 
 **Para instalar:**
 
@@ -14,7 +14,7 @@ Oi! Mandei a versão nova da extensão (0.2.6), em anexo. São uns 5 minutos.
    mesma pasta de antes (não crie uma pasta nova).
 2. Abra `edge://extensions` (ou `chrome://extensions`) e clique no **ícone de
    recarregar** no quadrinho da ML Metrics. Confira se a versão mudou para
-   **0.2.6**.
+   **0.2.7**.
 3. Aperte **F5** em todas as abas do Mercado Livre que estiverem abertas.
 4. Clique no **ícone da extensão** e depois em **"Limpar dados guardados"** —
    é para a versão nova começar do zero.
