@@ -303,7 +303,8 @@
   // Que o manifest segue esta ordem, quem confere e o teste em Node.
   // O painel tambem usa o gravacao.js (nomes das chaves do storage, lote 26b).
   const SCRIPTS_COLETOR = ["/src/gravacao.js", "/src/leitura.js", "/src/diagnostico.js", "/src/coletor.js"];
-  const SCRIPTS_PAINEL = ["/src/gravacao.js", "/src/calculo.js", "/src/content.js"];
+  // O painel usa o leitura.js desde o lote 32 (o "N vendido" da pagina).
+  const SCRIPTS_PAINEL = ["/src/gravacao.js", "/src/leitura.js", "/src/calculo.js", "/src/content.js"];
   const SCRIPTS_TODOS = SCRIPTS_COLETOR.concat(["/src/calculo.js", "/src/content.js"]);
 
   async function rodar() {
@@ -557,6 +558,27 @@
       valorDaLinha(vitrine.documento, "Visitas"));
     testar("#38: e nada e capturado nessa vitrine", "MLB3456789012",
       Object.keys(armazemVitrine.mlmetrics_dados).join(","));
+
+    // --- 8c. Painel com o que a propria pagina diz (lote 32) ---------------
+    // Sem nada capturado, numa pagina de produto: o "1 vendido" do anuncio e
+    // real e da para mostrar. As visitas, nao - elas nao existem ali.
+    const armazemVazio = {};
+    const soDaPagina = await abrirFixture(
+      "/kit-2-caixa/up/MLBU0000000001",
+      armazemVazio,
+      SCRIPTS_PAINEL
+    );
+    await esperar(900);
+
+    testar("página de produto: mostra as vendas lidas da própria página", "1",
+      valorDaLinha(soDaPagina.documento, "Vendas"));
+    testar("página de produto: sem visitas, não inventa conversão", "—",
+      valorDaLinha(soDaPagina.documento, "Conversão"));
+    testar("página de produto: o painel diz que o número é desta página", true,
+      /Lido desta página de produto/.test(
+        (soDaPagina.documento.getElementById("mlmetrics-painel") || {}).textContent || ""));
+    testar("página de produto: nada é gravado no storage", 0,
+      Object.keys(armazemVazio).length);
 
     // --- 9. Aviso de tela que parou e conferencia (lote 27) ----------------
     const avisoDeTela = popup.documento.getElementById("telas");

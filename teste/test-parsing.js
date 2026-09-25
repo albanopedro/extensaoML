@@ -93,6 +93,7 @@ const {
   valorDoRotulo,
   lerRotulo,
   ehPaginaDeCompra,
+  vendidosDaPagina,
   ehOrigemConhecida,
   paginaMencionaVisita,
   varrerPagina,
@@ -970,6 +971,44 @@ const rUrlInvalida = varrerPagina(documentoDa(corpoVendedor), "nao-e-uma-url");
 testar("url invalida: a leitura continua", 359, rUrlInvalida["MLB3456789012"].visitas);
 testar("url invalida: o rastro diz que a tela e desconhecida", "(url invalida)",
   rUrlInvalida["MLB3456789012"].origem.visitas.tela);
+
+console.log("");
+console.log("=== vendidos na pagina de produto (lote 32) ===");
+// Unico numero REAL do anuncio numa pagina publica. Em volta dele estao os
+// "+N vendidos" dos produtos recomendados e as "vendas" da reputacao do
+// vendedor - que ja derrubaram este projeto uma vez (#34).
+function paginaDeProduto(textos) {
+  return documentoDa(elementoDa("body", {}, textos.map(function (texto) {
+    return elementoDa("span", {}, [textoDa(texto)]);
+  })));
+}
+
+const vendidoDoAnuncio = vendidosDaPagina(paginaDeProduto([
+  "Novo | 1 vendido",
+  "+100 vendidos",
+  "+25 vendidos",
+  "+1.000 vendidos",
+  "Mais vendidos"
+]));
+
+testar("vendidos: le o numero exato do anuncio", 1,
+  vendidoDoAnuncio ? vendidoDoAnuncio.valor : null);
+testar("vendidos: com o trecho de onde leu", true,
+  Boolean(vendidoDoAnuncio) && /1 vendido/.test(vendidoDoAnuncio.trecho));
+
+testar("vendidos: so faixas arredondadas nao viram numero", null,
+  vendidosDaPagina(paginaDeProduto(["+100 vendidos", "+10mil vendidos", "Mais vendidos"])));
+
+testar("vendidos: dois numeros exatos diferentes = ambiguo, nao mostra", null,
+  vendidosDaPagina(paginaDeProduto(["Novo | 2 vendidos", "9 vendidos na loja"])));
+
+testar("vendidos: o painel da propria extensao e ignorado", null,
+  vendidosDaPagina(documentoDa(elementoDa("body", {}, [
+    elementoDa("div", { id: "mlmetrics-painel" }, [textoDa("50 vendidos")])
+  ]))));
+
+testar("vendidos: 'vendas' da reputacao do vendedor nao conta", null,
+  vendidosDaPagina(paginaDeProduto(["MercadoLíder | +1000 vendas", "1.500 vendas"])));
 
 console.log("");
 console.log("=== codigo do item DENTRO da pagina (lote 29) ===");

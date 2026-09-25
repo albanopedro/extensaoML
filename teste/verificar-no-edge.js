@@ -341,6 +341,19 @@ async function verificar() {
         "https://www.mercadolivre.com.br/vitrine-real/up/MLBU0000000099");
       await esperar(1200);
 
+      // Antes de semear nada: o painel ja aparece com o "N vendido" que a
+      // PROPRIA pagina mostra (lote 32). E o unico numero real de um anuncio
+      // que nao e da conta de quem esta olhando.
+      testar("vitrine real: painel aparece com o vendido lido da página", true, await ate(
+        function () {
+          return navegador.rodar(real.sessao, `
+            const p = document.getElementById("mlmetrics-painel");
+            return Boolean(p) && /Lido desta página de produto/.test(p.textContent);
+          `);
+        },
+        function (tem) { return tem === true; }
+      ));
+
       const codigo = await navegador.rodarNaExtensao(real, "ML Metrics",
         "return MLMetricsCalculo.codigoDoItemNaPagina(document);");
 

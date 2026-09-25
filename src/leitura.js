@@ -954,6 +954,66 @@ var MLMetricsLeitura = (function () {
     return todo.slice(inicio, fim).trim();
   }
 
+  /**
+   * Le o "N vendido(s)" DO ANUNCIO numa pagina publica de produto.
+   *
+   * A pagina de produto nao mostra visitas - elas so existem para quem e dono
+   * do anuncio. Mas mostra quantas unidades ja foram vendidas, e esse numero
+   * e do anuncio. E o unico dado real que da para mostrar a quem abre um
+   * anuncio que nao e seu.
+   *
+   * O perigo aqui tem historia: a mesma pagina traz "+1000 vendas" da
+   * REPUTACAO do vendedor e "+100 vendidos" dos produtos recomendados. Ler
+   * isso sem cuidado foi o pior defeito do projeto (#34), com um anuncio de
+   * uma venda exibindo mil. As travas, em camadas:
+   *
+   *   - so a palavra "vendido/vendida", nunca "venda/vendas" - a reputacao
+   *     do vendedor fala em "vendas";
+   *   - numero exato colado ao rotulo (lerRotulo); "+100", "+1.000" e
+   *     "+10mil" sao recusados por motivoDoNumero;
+   *   - se sobrar MAIS DE UM valor diferente na pagina, nao devolve nada:
+   *     na duvida, nao mostra.
+   *
+   * Conferido na pagina real salva: o anuncio aparece uma vez ("Novo | 1
+   * vendido") e todos os outros sao "+N vendidos", que caem nas recusas.
+   *
+   * @param {Document} doc
+   * @returns {Object|null} { valor, trecho } ou null
+   */
+  function vendidosDaPagina(doc) {
+    const caminhante = doc.createTreeWalker(
+      doc.body,
+      NodeFilter.SHOW_TEXT,
+      aceitarNoDeTextoTecnico
+    );
+
+    const achados = [];
+    let no = caminhante.nextNode();
+
+    while (no) {
+      const texto = (no.nodeValue || "").trim();
+      const elemento = no.parentElement;
+      const daExtensao = Boolean(elemento &&
+        elemento.closest("#mlmetrics-painel, #mlmetrics-aviso"));
+
+      // Texto curto: "1 vendido" e um rotulo, nao um paragrafo que menciona
+      // a palavra.
+      if (!daExtensao && texto.length > 0 && texto.length < 120 &&
+          /vendid[oa]s?/i.test(texto)) {
+        const leitura = lerRotulo(texto.toLowerCase(), "vendid");
+
+        if (leitura && leitura.valor !== undefined &&
+            !achados.some(function (achado) { return achado.valor === leitura.valor; })) {
+          achados.push({ valor: leitura.valor, trecho: trechoDaLeitura(texto, leitura) });
+        }
+      }
+
+      no = caminhante.nextNode();
+    }
+
+    return achados.length === 1 ? achados[0] : null;
+  }
+
   // --------------------------------------------------------------------------
   // Escopo e endereco
   // --------------------------------------------------------------------------
@@ -1101,6 +1161,7 @@ var MLMetricsLeitura = (function () {
     varrerPagina: varrerPagina,
     anotarImplausiveis: anotarImplausiveis,
     contextoDoTexto: contextoDoTexto,
+    vendidosDaPagina: vendidosDaPagina,
     ehPaginaDeCompra: ehPaginaDeCompra,
     ehOrigemConhecida: ehOrigemConhecida,
     caminhoMascarado: caminhoMascarado

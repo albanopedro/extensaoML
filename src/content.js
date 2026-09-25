@@ -112,6 +112,46 @@
   }
 
   /**
+   * Painel com o que a PROPRIA PAGINA diz, quando nao ha nada capturado.
+   *
+   * So vale em pagina de produto, e so com o "N vendido" do anuncio. Esse
+   * numero NAO e gravado no cache: o cache guarda o que veio das telas de
+   * vendedor, e misturar as duas origens foi o que encheu o storage de
+   * numero errado no lote 16. Aqui ele e lido, mostrado e esquecido.
+   *
+   * A origem vai escrita no painel e no rastro de cada numero: quem olha
+   * precisa saber que aquilo saiu da pagina publica, nao da conta dela.
+   *
+   * @returns {boolean} true se montou o painel
+   */
+  function mostrarOQueAPaginaDiz() {
+    if (!MLMetricsLeitura.ehPaginaDeCompra(window.location.href)) return false;
+
+    const vendidos = MLMetricsLeitura.vendidosDaPagina(document);
+    if (!vendidos) return false;
+
+    const agora = Date.now();
+    const origem = {
+      vendas: {
+        trecho: vendidos.trecho,
+        tela: "esta página de produto",
+        em: agora
+      }
+    };
+
+    const preco = lerPreco();
+    montarPainel(
+      MLMetricsCalculo.calcular({ vendas: vendidos.valor }, preco),
+      agora,
+      origem,
+      preco,
+      true
+    );
+
+    return true;
+  }
+
+  /**
    * Le o preco do produto nos DADOS ESTRUTURADOS da pagina.
    *
    * Duas fontes, as duas publicadas pelo ML para buscadores (Google Shopping
@@ -216,8 +256,10 @@
    * @param {number} capturadoEm idade a exibir no rodape
    * @param {Object} origem rastro de cada numero lido (somenteComOrigem)
    * @param {number|null} preco preco lido da pagina, para explicar a receita
+   * @param {boolean} [daPagina] true quando o numero foi lido AGORA da pagina
+   *                  de produto, e nao capturado numa tela de vendedor
    */
-  function montarPainel(metricas, capturadoEm, origem, preco) {
+  function montarPainel(metricas, capturadoEm, origem, preco, daPagina) {
     // O ML e uma SPA: navegar entre produtos nao recarrega a pagina, entao
     // este script pode rodar de novo. Removemos o painel anterior em vez de
     // so desistir, senao ficariamos exibindo os dados do produto antigo.
@@ -316,8 +358,22 @@
       rodape.className += " " + PREFIXO + "-alerta";
     }
 
-    rodape.textContent = MLMetricsCalculo.descreverIdade(capturadoEm);
+    // Numero lido da propria pagina nao tem idade: ele e de agora. E precisa
+    // dizer de onde veio, senao vira "a extensao sabe as vendas dela", o que
+    // nao e verdade - e a mesma pagina mostra numeros do VENDEDOR logo ao
+    // lado.
+    rodape.textContent = daPagina
+      ? "Lido desta página de produto, agora."
+      : MLMetricsCalculo.descreverIdade(capturadoEm);
     painel.appendChild(rodape);
+
+    if (daPagina) {
+      const aviso = document.createElement("div");
+      aviso.className = PREFIXO + "-dica";
+      aviso.textContent = "As visitas não aparecem em página de produto: " +
+        "o Mercado Livre só mostra isso para quem é dono do anúncio.";
+      painel.appendChild(aviso);
+    }
 
     // Sem esta dica ninguem descobre que passar o mouse mostra a origem.
     const dica = document.createElement("div");
@@ -373,15 +429,17 @@
         const escolha = MLMetricsCalculo.escolherRegistro(chaveNoInicio.split("|"), cache);
 
         if (!escolha) {
-          // Sem dado conferivel deste anuncio: nenhum painel. Um painel com
-          // numeros que ainda esteja na tela sai - e o que acontece logo
-          // depois de "Limpar dados guardados", quando o cache inteiro some.
+          // Sem dado capturado deste anuncio. Numa pagina de produto ainda
+          // resta uma coisa REAL de ler: quantas unidades ele ja vendeu (ver
+          // vendidosDaPagina). E o que da para mostrar em anuncio de qualquer
+          // vendedor - visitas, ali, nao existem para ninguem alem do dono.
           //
-          // Nao existe mais o painel "Sem dados" (#46). Ele aparecia em TODO
-          // anuncio aberto - inclusive de outros vendedores, que nunca vao ter
-          // dado - com uma instrucao que nao resolvia nada. A dica de abrir
-          // "Minhas publicacoes" ficou no popup.
-          removerPainel();
+          // Fora isso, nenhum painel. Um painel com numeros que ainda esteja
+          // na tela sai - e o que acontece logo depois de "Limpar dados
+          // guardados", quando o cache inteiro some. Nao existe mais o painel
+          // "Sem dados" (#46): ele aparecia em TODO anuncio, com uma
+          // instrucao que nao resolvia nada.
+          if (!mostrarOQueAPaginaDiz()) removerPainel();
           return;
         }
 
