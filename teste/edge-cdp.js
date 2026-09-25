@@ -121,6 +121,46 @@ function esperar(ms) {
 }
 
 /**
+ * Apaga o perfil do teste, derrubando antes qualquer Edge que tenha sobrado
+ * de uma rodada interrompida.
+ *
+ * Sem isso, a sobra segura os arquivos e o apagar falha com EBUSY - foi o que
+ * aconteceu quando uma rodada foi interrompida no meio. So mata processo cuja
+ * linha de comando aponta para ESTE perfil: o Edge do dia a dia, com as abas
+ * e os logins de quem esta na maquina, nao e tocado.
+ *
+ * Se mesmo assim nao der para apagar, usamos um perfil com outro nome em vez
+ * de travar a rodada.
+ *
+ * @param {string} perfil
+ * @returns {string} o perfil a usar
+ */
+function limparPerfil(perfil) {
+  try {
+    spawnSync("powershell", ["-NoProfile", "-Command",
+      "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | " +
+      "Where-Object { $_.CommandLine -like '*" + perfil + "*' } | " +
+      "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+    ], { stdio: "ignore" });
+  } catch (e) {
+    // sem powershell: seguimos assim mesmo, o apagar abaixo tenta
+  }
+
+  for (let tentativa = 0; tentativa < 5; tentativa++) {
+    try {
+      fs.rmSync(perfil, { recursive: true, force: true });
+      return perfil;
+    } catch (e) {
+      // Windows demora a soltar os arquivos depois de matar o processo.
+      const ate = Date.now() + 400;
+      while (Date.now() < ate) { /* espera curta, sincrona de proposito */ }
+    }
+  }
+
+  return perfil + "-" + Date.now();
+}
+
+/**
  * Conversa com o Edge pelo protocolo de depuracao.
  *
  * Uma conexao WebSocket so, no nivel do NAVEGADOR; cada aba ou service
@@ -339,8 +379,7 @@ async function abrirEdge(opcoes) {
   // Perfil NOVO a cada rodada. Reaproveitar o anterior deixava o storage da
   // extensao com o que a rodada passada gravou, e o teste passava a olhar
   // dado velho - chegou a dar "capturou" antes de a pagina carregar.
-  const perfil = path.join(pastaDoTeste(), "perfil");
-  fs.rmSync(perfil, { recursive: true, force: true });
+  const perfil = limparPerfil(path.join(pastaDoTeste(), "perfil"));
 
   const argumentos = [
     "--remote-debugging-port=" + PORTA_CDP,

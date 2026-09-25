@@ -181,6 +181,24 @@ async function verificar() {
     testar("item 10 - historico: o dia de hoje foi gravado", 359,
       (historico[hoje] || {}).visitas);
 
+    // O numero no icone: sinal de "estou capturando" sem abrir o popup.
+    const distintivo = await ate(
+      function () {
+        return navegador.rodar(sw.sessao, `
+          const texto = await chrome.action.getBadgeText({});
+          const g = await chrome.storage.local.get("mlmetrics_dados");
+          return {
+            texto: texto,
+            quantos: MLMetricsGravacao.contarConferiveis(g.mlmetrics_dados || {})
+          };
+        `);
+      },
+      function (r) { return r.texto !== "" && r.texto === String(r.quantos); }
+    );
+
+    testar("icone: o número mostrado bate com o que foi capturado", true,
+      distintivo.texto !== "" && distintivo.texto === String(distintivo.quantos));
+
     // --- Itens 1 e 7: diagnostico da aba ativa -----------------------------
     // O popup pergunta a aba ATIVA (chrome.tabs.query + sendMessage). Aqui o
     // pedido sai do service worker, que e o mesmo caminho de mensagem; o
@@ -405,6 +423,14 @@ async function verificar() {
 
     testar("item 4 - limpar apaga todas as chaves da extensao", [],
       chavesDaExtensao(await armazenamento(navegador, sw)));
+
+    testar("icone: depois de limpar, o número some", "", await ate(
+      function () {
+        return navegador.rodar(sw.sessao, "return await chrome.action.getBadgeText({});");
+      },
+      function (texto) { return texto === ""; },
+      5
+    ));
 
     // --- Custo da leitura numa pagina real (pesada) ------------------------
     // A leitura roda a cada mutacao do DOM, e a pagina do ML e grande. Se ela

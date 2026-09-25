@@ -226,6 +226,28 @@ var MLMetricsGravacao = (function () {
   }
 
   /**
+   * Quantos anuncios do cache tem numero CONFERIVEL - com rastro de origem.
+   *
+   * E o mesmo criterio do painel: numero sem rastro (gravado por versao
+   * antiga) nao e exibido, entao nao pode ser contado como capturado. Serve
+   * ao numero que aparece no icone da extensao (ver atualizarDistintivo no
+   * background.js).
+   *
+   * @param {Object} cache mlmetrics_dados
+   * @returns {number}
+   */
+  function contarConferiveis(cache) {
+    return Object.keys(cache || {}).filter(function (codigo) {
+      const registro = cache[codigo] || {};
+      const origem = registro.origem || {};
+
+      return METRICAS.some(function (metrica) {
+        return registro[metrica] !== undefined && Boolean(origem[metrica]);
+      });
+    }).length;
+  }
+
+  /**
    * Chave do historico de um anuncio no storage.
    *
    * @param {string} codigo ex: "MLB3456789012"
@@ -325,6 +347,7 @@ var MLMetricsGravacao = (function () {
     faltaOrigem: faltaOrigem,
     mesclarOrigem: mesclarOrigem,
     mesclar: mesclar,
+    contarConferiveis: contarConferiveis,
     chaveDoHistorico: chaveDoHistorico,
     diaDe: diaDe,
     registrarDia: registrarDia

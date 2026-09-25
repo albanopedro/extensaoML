@@ -250,3 +250,51 @@ chrome.runtime.onMessage.addListener(function (mensagem, remetente, responder) {
 
   return false;
 });
+
+// ----------------------------------------------------------------------------
+// Numero no icone da extensao
+// ----------------------------------------------------------------------------
+
+/**
+ * Mostra no icone quantos anuncios tem numero conferivel.
+ *
+ * Por que: hoje, para saber se a extensao esta capturando, e preciso abrir o
+ * popup. O numero no icone responde isso de relance - e, se ele ficar vazio
+ * depois de uma passada por "Minhas publicacoes", isso tambem e resposta.
+ * Vale mais para quem nao e tecnica: e o sinal de "estou viva e trabalhando".
+ *
+ * Vazio quando nao ha nada: um "0" no icone parece defeito. Acima de 99 vira
+ * "99+", que e o que cabe no espaco.
+ *
+ * @param {Object|undefined} cache mlmetrics_dados
+ */
+function atualizarDistintivo(cache) {
+  const quantos = MLMetricsGravacao.contarConferiveis(cache || {});
+  const texto = quantos === 0 ? "" : (quantos > 99 ? "99+" : String(quantos));
+
+  try {
+    chrome.action.setBadgeText({ text: texto });
+    chrome.action.setBadgeBackgroundColor({ color: "#3483fa" });
+  } catch (e) {
+    // Navegador sem chrome.action (ou contexto invalidado): o icone fica sem
+    // numero, e nada mais depende disso.
+  }
+}
+
+// Toda gravacao no cache - venha de qual aba vier - atualiza o numero.
+chrome.storage.onChanged.addListener(function (mudancas, area) {
+  if (area !== "local" || !mudancas[CHAVE_CACHE]) return;
+  atualizarDistintivo(mudancas[CHAVE_CACHE].newValue);
+});
+
+// O service worker do Manifest V3 e desligado quando fica ocioso e acorda a
+// cada evento. Em toda acordada reconferimos o numero: depois de um reinicio
+// do navegador ele volta zerado, e ficaria mentindo "nao capturei nada".
+try {
+  chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
+    if (chrome.runtime.lastError) return;
+    atualizarDistintivo(guardado[CHAVE_CACHE]);
+  });
+} catch (e) {
+  // contexto invalidado durante a atualizacao da extensao
+}

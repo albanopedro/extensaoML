@@ -1264,6 +1264,23 @@ testar("historico: marca leitura da busca automatica", true,
   histAuto["2026-09-18"].origem.visitas.automatica);
 
 console.log("");
+console.log("=== numero do icone (lote 31) ===");
+// O icone conta o mesmo que o painel mostra: anuncio com numero que tem
+// rastro. Registro de versao antiga, sem rastro, nao conta - senao o icone
+// diria "12 capturados" com o popup mostrando "sem origem".
+const cacheDoIcone = {
+  MLB1: { visitas: 359, origem: { visitas: { trecho: "a" } } },
+  MLB2: { vendas: 12, origem: { vendas: { trecho: "b" } } },
+  MLB3: { visitas: 99 },
+  MLB4: { origem: { visitas: { trecho: "c" } } }
+};
+
+testar("icone: conta so anuncio com numero e rastro", 2,
+  MLMetricsGravacao.contarConferiveis(cacheDoIcone));
+testar("icone: cache vazio conta zero", 0, MLMetricsGravacao.contarConferiveis({}));
+testar("icone: sem cache nenhum conta zero", 0, MLMetricsGravacao.contarConferiveis(undefined));
+
+console.log("");
 console.log("=== chaves do storage num lugar so (lote 26b) ===");
 // Os nomes sao o ENDERECO do que ja esta guardado no navegador da cliente:
 // trocar "mlmetrics_dados" por outro nome faria a versao nova nao achar nada
@@ -1310,7 +1327,11 @@ testar("chaves: nenhum outro arquivo de src/ escreve nome de chave a mao", "",
  */
 function chromeParaServiceWorker() {
   const armazem = {};
+  const ouvintesDoStorage = [];
   let ouvinte = null;
+
+  // O que estaria escrito no icone da extensao (ver atualizarDistintivo).
+  const icone = { texto: null };
 
   function copia(valor) {
     return valor === undefined ? undefined : JSON.parse(JSON.stringify(valor));
@@ -1322,6 +1343,7 @@ function chromeParaServiceWorker() {
 
   return {
     armazem: armazem,
+    icone: icone,
     enviar: function (mensagem, remetente) {
       return new Promise(function (resolve) {
         ouvinte(mensagem, remetente, resolve);
@@ -1334,6 +1356,11 @@ function chromeParaServiceWorker() {
         addListener: function (funcao) { ouvinte = funcao; }
       }
     },
+    // O numero do icone: o service worker escreve aqui (chrome.action).
+    action: {
+      setBadgeText: function (opcoes) { icone.texto = opcoes.text; },
+      setBadgeBackgroundColor: function () { /* cor nao muda comportamento */ }
+    },
     storage: {
       local: {
         get: function (chaves, callback) {
@@ -1345,12 +1372,25 @@ function chromeParaServiceWorker() {
         },
         set: function (objeto, callback) {
           setTimeout(function () {
+            const mudancas = {};
+
             Object.keys(objeto).forEach(function (chave) {
+              mudancas[chave] = {
+                oldValue: copia(armazem[chave]),
+                newValue: copia(objeto[chave])
+              };
               armazem[chave] = copia(objeto[chave]);
             });
+
+            // O navegador avisa quem estiver ouvindo - e e assim que o
+            // numero do icone se atualiza.
+            ouvintesDoStorage.forEach(function (aviso) { aviso(mudancas, "local"); });
             if (callback) callback();
           }, atraso());
         }
+      },
+      onChanged: {
+        addListener: function (funcao) { ouvintesDoStorage.push(funcao); }
       }
     }
   };
@@ -1403,6 +1443,10 @@ async function testesDoServiceWorker() {
     histMLB1.origem ? histMLB1.origem.visitas.trecho : "sem rastro");
   testar("SW: cada anuncio na propria chave de historico", 20,
     ((chromeSW.armazem.mlmetrics_historico_MLB2 || {})[hoje] || {}).visitas);
+
+  // O numero do icone acompanha as gravacoes, sem ninguem abrir o popup.
+  testar("SW: o icone mostra quantos anuncios tem numero conferivel", "2",
+    chromeSW.icone.texto);
 
   const buscaFora = await chromeSW.enviar({ tipo: "buscar", url: "https://example.com/" }, daExtensao);
   testar("SW: busca fora do dominio do ML e recusada", false, buscaFora.ok);
