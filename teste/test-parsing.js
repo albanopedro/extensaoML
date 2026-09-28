@@ -1044,6 +1044,28 @@ testar("vendidos: condicao usada tambem conta", 1000, (function () {
   return usado ? usado.valor : null;
 })());
 
+// O espacamento REAL do ML (paginas salvas em teste/ e o anuncio do Pedro em
+// 28/09): DOIS espacos de cada lado da barra. A regra do lote 33 aceitava so
+// 4 caracteres entre a condicao e o numero, e o "+" nao cabia: o anuncio
+// "Novo  |  +500 vendidos" ficava sem painel (lote 39). A fixture de
+// espaco simples nao pegava isso.
+testar("vendidos: espacamento real do ML com faixa (+500)", "500/true", (function () {
+  const real = vendidosDaPagina(paginaDeProduto(["Novo  |  +500 vendidos", "+100 vendidos"]));
+  return real ? real.valor + "/" + real.aproximado : "nada";
+})());
+testar("vendidos: espacamento real do ML exato (1 vendido)", "1/false", (function () {
+  const real = vendidosDaPagina(paginaDeProduto(["Novo  |  1 vendido", "+100 vendidos"]));
+  return real ? real.valor + "/" + real.aproximado : "nada";
+})());
+testar("vendidos: espaco sem quebra (nbsp) em volta da barra", "500/true", (function () {
+  const real = vendidosDaPagina(paginaDeProduto(["Novo  |  +500 vendidos"]));
+  return real ? real.valor + "/" + real.aproximado : "nada";
+})());
+// A condicao precisa estar COLADA no numero - so espaco e um separador. Uma
+// frase que fala de "novo" e depois de vendidos nao e o subtitulo.
+testar("vendidos: frase com 'novo' longe do numero nao vira subtitulo", null,
+  vendidosDaPagina(paginaDeProduto(["Modelo novo, mais de +500 vendidos"])));
+
 const contaAproximada = calcular({ vendas: 25, vendasAproximadas: true }, 60);
 testar("vendidos: a conta marca a receita como piso", "1500/true",
   contaAproximada.receita + "/" + contaAproximada.vendasAproximadas);

@@ -64,7 +64,7 @@ envolvido → propõe a correção → aplicamos.**
 (visitas, vendas, conversão, receita estimada) nos anúncios do Mercado Livre de uma
 vendedora.
 
-Caminho: `C:\codes\extensaoML` · versão no manifest: **0.2.8**
+Caminho: `C:\codes\extensaoML` · versão no manifest: **0.2.9**
 
 **Restrição central do projeto:** a API pública do Mercado Livre devolve 403 e
 exigiria OAuth ou cookie de sessão. Por isso a extensão **raspa a tela** em vez de
@@ -269,7 +269,7 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
 | Harness | **306/306 PASS** (+17 nos lotes 31 a 33: contagem do ícone e a leitura do "N vendido" da página de produto — número exato, faixa arredondada como piso, e as recusas que separam o número do anúncio do da reputação). `node --check` ok em todos os JS. |
 | Teste em DOM real | ✅ **versionado** (lote 22): `node teste/servidor-teste.js` e abrir `http://127.0.0.1:5178/teste/rodar-no-navegador.html` → **57/57 PASS** (+8 no lote 27: aviso laranja no popup; marcar, copiar e desmarcar a conferência; tela conhecida que parou vira aviso; tela desconhecida não; tela que voltou a entregar sai do aviso). Cobre o gabarito de `publicacoes.html`, números antes dos rótulos em irmãos, leitura ambígua e o motivo no diagnóstico, card com item + catálogo (#38), painel completo, fechar, vendas acima das visitas (#40), anúncio sem dado sem painel (#46), item do `pdp_filters`, script órfão e o período no diagnóstico com controles reais (lista, radio, botão, campo de datas). |
 | Verificação no Edge | ✅ **30/30 PASS** (lote 28): extensão instalada de verdade, a partir do ZIP de `dist/`. Cobre os 11 itens da lista manual e mede o custo da leitura numa página real salva — **888 KB: 3 ms no portão, 7 ms na varredura completa** (22/09). |
-| Pacote | `dist\ML-Metrics-0.2.8.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
+| Pacote | `dist\ML-Metrics-0.2.9.zip` (inclui `gravacao.js`). Zips anteriores apagados (superados). |
 
 ### ⚠️ Repositório público — decisão do Pedro
 
@@ -336,7 +336,7 @@ Os itens, todos cobertos pelo comando acima:
    trecho de cada um.
 8. **#21** — com duas telas de vendedor abertas em abas diferentes (F5 nas duas), o
    popup lista os anúncios das duas; nenhuma apaga o que a outra gravou.
-9. **Popup** — o título mostra "ML Metrics v0.2.8".
+9. **Popup** — o título mostra "ML Metrics v0.2.9".
 10. **Histórico (lote 26)** — depois de capturar numa tela de vendedor, "Copiar
     diagnóstico": `historico.anuncios` > 0 e `historico.ultimoDia` = hoje. Em
     `edge://extensions` → Detalhes da ML Metrics, a extensão aceita a permissão nova
@@ -348,10 +348,10 @@ Os itens, todos cobertos pelo comando acima:
 
 ### Ação pendente (depois da verificação)
 
-1. Enviar `dist\ML-Metrics-0.2.8.zip` à cliente, com o texto do
+1. Enviar `dist\ML-Metrics-0.2.9.zip` à cliente, com o texto do
    **`MENSAGEM-CLIENTE.md`** (instalação em 4 passos e as 3 coisas que precisam voltar).
 2. A cliente segue **"Depois de uma atualização"** do guia: substituir os arquivos na
-   mesma pasta, recarregar a extensão, conferir a versão **0.2.8** (também no popup),
+   mesma pasta, recarregar a extensão, conferir a versão **0.2.9** (também no popup),
    **F5** nas abas do ML.
 3. A cliente clica **"Limpar dados guardados"** (agora apaga também as origens
    envenenadas pelo build antigo).
@@ -418,7 +418,7 @@ código**: são decisões e ações do Pedro fora do repositório/extensão em s
 | # | Sev. | Título | Status | Quem resolve |
 |---|---|---|---|---|
 | #50 | MÉDIO | Privacidade no repositório GitHub (resíduo: repo público + histórico) | ⚠️ parcial | Pedro (GitHub) |
-| — | — | Enviar a 0.2.8 à cliente (commits em dia; a verificação virou `node teste/verificar-no-edge.js`) | ⬜ | Pedro |
+| — | — | Enviar a 0.2.9 à cliente (commits em dia; a verificação virou `node teste/verificar-no-edge.js`) | ⬜ | Pedro |
 
 ---
 
@@ -664,6 +664,20 @@ e conferir 11 itens na mão.
 | Custo da leitura | A verificação no Edge passou a medir, **dentro do mundo isolado da extensão** (`rodarNaExtensao`), quanto custa ler uma página real salva em `teste/` — as que têm dado da cliente e ficam fora do repositório. Em 888 KB: **3 ms** no portão (`paginaMencionaVisita`, que roda a cada lote de mutações em qualquer página do ML) e **7 ms** na varredura completa (com um rótulo plantado, já que a página salva é vitrine). Limites de 100 ms e 500 ms, para pegar regressão grande sem falhar em máquina ocupada. Sem página salva, o caso é **pulado**, não falha. → **23/23**. |
 | Mensagem pronta | `MENSAGEM-CLIENTE.md`: o texto para mandar junto com o zip (instalar em 4 passos, e depois diagnóstico + conferência dos 3 anúncios), mais a lista do que precisa voltar. Tira o atrito do passo que está travando o projeto. |
 
+### Lote 39 — subtítulo com o espaçamento real do ML (28/09/2026)
+
+Pedro abriu um anúncio com **"Novo  |  +500 vendidos"** e o painel não apareceu. Pelo
+Console dele, o subtítulo estava inteiro num elemento só (`ui-pdp-header__subtitle`).
+O defeito era da regra do lote 33.
+
+| Item | O que foi feito |
+|---|---|
+| Causa | O `SUBTITULO` de `vendidosDaPagina` aceitava no máximo 4 caracteres entre a condição e o número (`[^\d+]{0,4}`). O ML escreve com **dois espaços de cada lado da barra**: 5 caracteres. Com "1 vendido" passava por acaso, porque um `\s*` depois absorvia o quinto espaço. Com "+500", o espaço sobrava antes do sinal e a regra falhava. A fixture do lote 33 usava espaço simples ("Novo \| +25 vendidos"), por isso o teste passou. |
+| Correção | O separador passou a ser descrito como ele é: espaços (inclusive sem quebra), no máximo uma barra ou traço, e mais espaços (`\s*[\|·•\-–]?\s*`). Ficou mais estrita que antes: "Modelo novo, mais de +500 vendidos" não vira subtítulo. |
+| Fixtures | `vitrine-up-sanitizada.html` e o caso "+25" do `rodar-no-navegador.html` passaram a usar o espaçamento real ("Novo  \|  …"). |
+| Testes | Harness +4 → **319/319** (espaçamento real com "+500" e com "1 vendido", espaço sem quebra, frase com "novo" longe do número). Reprova provada: com a regra antiga, 2 falhas no harness e 2 no navegador. Navegador **71/71**, Edge **30/30** contra o zip. `manifest.json` → **0.2.9**, `dist\ML-Metrics-0.2.9.zip` gerado. |
+| Aprendizado | Fixture escrita à mão, "limpa", esconde defeito de formato. O texto de fixture deve ser copiado da página real, com o espaçamento dela. |
+
 ### Lote 38 — busca automática removida (28/09/2026)
 
 Pedido do Pedro. A busca estava desligada desde o lote 22 (`BUSCA_AUTOMATICA_LIGADA = false`), e o
@@ -873,7 +887,7 @@ tela real disser o que o número significa (#47), o histórico já estará lá, 
 | — | 26b — Chaves do storage num lugar só | — | ✅ | Feito em 18/09. |
 | — | 27 — Conferência num clique + aviso de tela que parou | — | ✅ | Feito em 21/09. |
 | — | 28 — Verificação no Edge automatizada | — | ✅ | Feito em 21/09. Só `teste/`. |
-| 1 | **Enviar a 0.2.8 + decisão do repositório** | #50 | ⬜ | Seção 4. O commit e a verificação dos 11 itens já estão resolvidos (lote 28). |
+| 1 | **Enviar a 0.2.9 + decisão do repositório** | #50 | ⬜ | Seção 4. O commit e a verificação dos 11 itens já estão resolvidos (lote 28). |
 | 2 | **★ Ação — capturar "Minhas publicações" real + conferência de 3 anúncios** | — | ⬜ | "Copiar diagnóstico" na tela (`telaAtual`, com `resumoDasRecusas`) e passo 7 do guia. Decide #47 e valida #38, #48 e #57. |
 | 3 | **23b — Período no rastro** | #47 | ⬜ | Com o `telaAtual.periodo` da tela real, registrar o recorte (7/30 dias) junto do rastro. |
 | 4 | ~~Decisão — religar a busca automática?~~ | — | ✅ | Removida no lote 38. |
@@ -936,7 +950,7 @@ paramos.
 | 21 — Robustez geral | ✅ feito | 15/09/2026 | Relato da cliente: "no anúncio aparecem só as visitas". Verificado no Node que a regra do #37 da 0.1.3 perdia vendas em texto corrido ("359 visitas 12 vendas") e gravava número errado ("… 12 vendas 5 disponíveis" → 5), além de aceitar "R$ 49" e "+1.000". **#57:** `lerRotulo` por fila de peças coladas (pontas decidem antes/depois; ambíguo recusa; recusa para de subir). **#58:** `motivoDoNumero` (preço, faixa +N, data, hora, decimal, %, período, mil, ano). **#59:** recusas com motivo no diagnóstico (`resumoDasRecusas`, `recusas`) e amostras por métrica. **#60:** preço só estruturado (meta ou JSON-LD). **#61:** idade por calendário, "13,9%", `lastError` lido. **#49:** SW valida remetente, https + domínio (também após redirect) e tem timeout. **#54 / #38 (exibição):** `codigosDaPagina` + `escolherRegistro`. **#47 (observer):** `characterData`, `href`, `every`. **#53:** extração que ignora comentário, string e regex. Guia: o diagnóstico explica recusas. Fixtures: comentários corrigidos, gabarito "13,9%". Harness **159/159**. **DOM real** (servidor local, `chrome` falso): gabarito exato; irmãos "359 visitas 12 vendas 5 disponíveis" → 359/12; "Estoque: 5 \| Vendas" recusado com motivo; painel 13,9%; receita "—" sem preço estruturado; item do `pdp_filters` escolhido. `manifest.json` → **0.1.4**, zip gerado. |
 | 22 — Tudo que não dependia da tela real | ✅ feito | 15/09/2026 | Pedido do Pedro: "pode fazer tudo". **Limite de custo:** `LIMITE_TEXTO_POR_NIVEL = 5000` em `valorDoRotulo` (medido ~7 ms por leitura em bloco de 100 mil caracteres). **#21:** `src/gravacao.js` (regra pura de mesclar, carregada no SW e nas abas) + fila única no `background.js` (`gravarNaFila`, mensagem "salvar"); o coletor manda gravar e, sem resposta, grava na aba (`gravarNestaAba`); `comCache` e a mesclagem saíram do coletor. **#38:** `codigosDentroDe` prefere o item quando o card também tem link de catálogo/user product. **#40 (decisão):** `anotarImplausiveis` não descarta; `calcular.vendasAcimaDasVisitas`; alerta no painel. **#46 (decisão):** sem painel "Sem dados" (`montarPainelVazio` removido). **Busca automática (decisão):** `BUSCA_AUTOMATICA_LIGADA = false`; guia: a extensão não faz nada sozinha. **Popup:** versão ao lado do nome. **#53:** harness com `gravacao.js` e service worker (três gravações simultâneas, remetente alheio, busca fora do ML e sem https) → **191/191**; teste em DOM real versionado (`teste/servidor-teste.js`, `teste/rodar-no-navegador.html`) → **31/31**. `manifest.json` → **0.1.5** (content_scripts com `gravacao.js`), zip gerado. |
 | 23a — Período no diagnóstico | ✅ feito | 15/09/2026 | Pedido do Pedro: preparar o diagnóstico para o #47. `telaAtual.periodo` (e `mlmetrics_diagnostico.periodo`): textos curtos de filtro de período (`ehTextoDePeriodo`, vocabulário fechado), com `marcado` pela opção de `<select>`, radio/checkbox do `<label>` ou `aria-selected/checked/pressed/current` (`estadoDoControle`); intervalo de datas também no valor de campo (sem campo escondido, senha, e-mail ou telefone); até 20, sem repetição, sem o painel. Só leitura: gravação e painel não mudam. Guia: o diagnóstico traz o período. Harness **221/221**; navegador **37/37** (controles reais). `manifest.json` → **0.1.6**, zip gerado. |
-| Enviar a 0.2.8 + repositório | ⬜ a fazer | | Seção 4 (Pedro). Commit e verificação já saíram do caminho. |
+| Enviar a 0.2.9 + repositório | ⬜ a fazer | | Seção 4 (Pedro). Commit e verificação já saíram do caminho. |
 | 0.1.7 — robustez (Pedro) | ✅ feito | 15/09/2026 | Commit `2fedda6`, direto por ele: tempo limite do plano B, `ehData` por calendário, `try/catch` no `new URL`, `lastError.message`. Entrou sem teste e sem registro — dívida paga no lote 24. |
 | 24 — Erro visível | ✅ feito | 17/09/2026 | Pedido do Pedro ("o que dá para melhorar"). **Falha silenciosa:** `coletar()` e o diagnóstico em `try/catch`; `registrarErro` grava `mlmetrics_erro` (onde, mensagem, 3 linhas de pilha, host, tela mascarada, hora, versão) com trava de 1 min; aviso vermelho no popup e `ultimoErro` no relatório. **Dívida da 0.1.7:** `motivoDoNumero` recusa a forma de data com ponto — sem isso, `31.04.2023` virava 31.042.023 visitas. Harness **231/231**, navegador **42/42**. `manifest.json` → **0.1.8**, zip gerado. |
 | 25 — `coletor.js` dividido | ✅ feito | 17/09/2026 | Pedido do Pedro (itens 2 e 3 das melhorias). `leitura.js` (`MLMetricsLeitura`), `diagnostico.js` (`MLMetricsDiagnostico`) e `calculo.js` (`MLMetricsCalculo`) saíram de `coletor.js` (2.015 → 696) e `content.js` (747 → 435), com o texto exato de cada função movido por script e as chamadas entre arquivos prefixadas. `diagnosticarTelaAtual()` → `diagnosticarTela(doc, local)`. Manifest na ordem de dependência. Harness sem extrator (`carregarModulo`), +6 casos da ordem do manifest → **237/237**; navegador **42/42**. Os quatro `var` da 0.1.7 → `const`/`let`. `manifest.json` → **0.1.9**, zip gerado. |
@@ -954,9 +968,10 @@ paramos.
 | 33 — Venda arredondada como piso | ✅ feito | 25/09/2026 | Anúncio com "Novo \| +25 vendidos" ficava sem painel. `vendidosDaPagina` passou a usar o subtítulo (condição + vendidos) como âncora — o que separa o número do anúncio dos "+N" das vitrines — e o painel mostra "+25" e "a partir de R$ …". "+10mil" continua fora. Harness **306/306**, navegador **71/71**, Edge **30/30**. `manifest.json` → **0.2.7**. |
 | 35 — Enxugar comentários | ✅ feito | 28/09/2026 | Pedido do Pedro. Comentários só com o porquê atual. `extensaoViva`, `ehDaExtensao` e `PADRAO_CODIGO` num lugar só. JS de 4.737 → 3.941 linhas, código comparado sem comentários: só as mudanças pretendidas. Harness **307/307**, navegador **71/71**, Edge **30/30**. Versão continua 0.2.7. |
 | 36 — Plano B = SW + storage | ✅ feito | 28/09/2026 | Pedido do Pedro. A gravação completa (`gravarNaFila`) e os helpers `lerStorage`/`gravarStorage`/`alterarStorage` ficam no `gravacao.js`, e SW, aba e popup usam os mesmos. Fecha a fila do plano B que travava com leitura malformada. JS de 3.941 → 3.868 linhas. Harness **314/314**, navegador **71/71**, Edge **30/30**. |
+| 39 — Subtítulo com espaçamento real | ✅ feito | 28/09/2026 | Anúncio "Novo  \|  +500 vendidos" sem painel: a regra do lote 33 aceitava só 4 caracteres de separador, e o ML usa 5. Separador descrito como ele é (espaços + barra ou traço). Fixtures com o espaçamento real. Harness **319/319**, navegador **71/71**, Edge **30/30**. `manifest.json` → **0.2.9**, zip gerado. |
 | 0.2.8 — pacote dos lotes 35–38 | ✅ feito | 28/09/2026 | `manifest.json` e `MENSAGEM-CLIENTE.md` → **0.2.8**; `distML-Metrics-0.2.8.zip` gerado pelo `empacotar.ps1` (15 arquivos: manifest, ícones e `src/`). Verificação no Edge **contra o próprio zip**: **30/30**, popup mostrando v0.2.8. Harness **315/315**. |
 | 38 — Busca automática removida | ✅ feito | 28/09/2026 | Pedido do Pedro. Sai todo o código da busca (coletor, SW, chave `ULTIMA_BUSCA` e o parâmetro `automatica`). O SW só grava e cuida do ícone. JS de 3.847 → 3.697 linhas. Harness **315/315**, navegador **71/71**, Edge **30/30**. |
 | 37 — Percurso único | ✅ feito | 28/09/2026 | Pedido do Pedro. `paraCadaTexto` no `leitura.js` substitui os 5 TreeWalkers e carrega as guardas (filtro técnico + nada da extensão). JS de 3.868 → 3.847 linhas. Harness **316/316**, navegador **71/71**, Edge **30/30**. |
 | 34 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
-| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.8: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
+| ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.9: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |

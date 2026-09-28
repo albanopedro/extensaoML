@@ -829,7 +829,10 @@ var MLMetricsLeitura = (function () {
    * @returns {Object|null} { valor, aproximado, trecho } ou null
    */
   function vendidosDaPagina(doc) {
-    const SUBTITULO = /(novo|usado|recondicionado)[^\d+]{0,4}(\+?)\s*([\d.]+)\s*vendid[oa]s?/i;
+    // Condicao, separador e numero COLADOS. O separador e so espaco (o ML
+    // escreve "Novo  |  +500 vendidos", com dois de cada lado) e no maximo
+    // uma barra ou traco - uma frase que so menciona "novo" nao casa.
+    const SUBTITULO = /(novo|usado|recondicionado)\s*[|·•\-–]?\s*(\+?)\s*([\d.]+)\s*vendid[oa]s?/i;
 
     const doSubtitulo = [];
     const exatos = [];

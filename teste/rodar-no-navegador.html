@@ -580,15 +580,17 @@
     testar("página de produto: nada é gravado no storage", 0,
       Object.keys(armazemVazio).length);
 
-    // Anuncio com muita venda: o ML arredonda ("Novo | +25 vendidos"). O
+    // Anuncio com muita venda: o ML arredonda ("Novo  |  +25 vendidos"). O
     // numero e PISO, e o painel precisa dizer isso - sem o "+", 25 viraria
-    // total exato aos olhos de quem le.
+    // total exato aos olhos de quem le. Com o espacamento REAL do ML (dois
+    // espacos de cada lado da barra): com espaco simples, o defeito do lote 39
+    // passou despercebido.
     const aproximada = await abrirFixture(
       "/kit-2-caixa/up/MLBU0000000001",
       {},
       SCRIPTS_PAINEL,
       function (documento) {
-        documento.querySelector(".condicao").textContent = "Novo | +25 vendidos";
+        documento.querySelector(".condicao").textContent = "Novo  |  +25 vendidos";
       }
     );
     await esperar(900);
