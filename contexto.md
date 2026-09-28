@@ -666,6 +666,19 @@ e conferir 11 itens na mão.
 | Custo da leitura | A verificação no Edge passou a medir, **dentro do mundo isolado da extensão** (`rodarNaExtensao`), quanto custa ler uma página real salva em `teste/` — as que têm dado da cliente e ficam fora do repositório. Em 888 KB: **3 ms** no portão (`paginaMencionaVisita`, que roda a cada lote de mutações em qualquer página do ML) e **7 ms** na varredura completa (com um rótulo plantado, já que a página salva é vitrine). Limites de 100 ms e 500 ms, para pegar regressão grande sem falhar em máquina ocupada. Sem página salva, o caso é **pulado**, não falha. → **23/23**. |
 | Mensagem pronta | `MENSAGEM-CLIENTE.md`: o texto para mandar junto com o zip (instalar em 4 passos, e depois diagnóstico + conferência dos 3 anúncios), mais a lista do que precisa voltar. Tira o atrito do passo que está travando o projeto. |
 
+### Lote 36 — plano B igual ao service worker + helpers de storage (28/09/2026)
+
+Pedido do Pedro. O JS de `src/` foi de 3.941 para **3.868 linhas**. Todo acesso ao
+`chrome.storage` agora passa pela seção "Acesso ao storage" do `gravacao.js`.
+
+| Item | O que foi feito |
+|---|---|
+| Plano B = SW | `gravarLeitura` (cache → mescla → grava → histórico) e `gravarNaFila` (a fila) moram no `gravacao.js`. O `background.js` e o `gravarNestaAba` do coletor chamam a mesma função. Saíram as cópias `gravarNaFila`/`gravarHistorico` (SW) e `gravarHistoricoNestaAba`/`filaDoCache` (aba). |
+| Defeito fechado | Na cópia da aba, o `mesclar` não tinha proteção. Uma leitura malformada lançava exceção dentro do callback, a promessa nunca resolvia e **a fila daquela aba travava até o F5**. Agora a leitura é recusada e a fila segue. |
+| Helpers | `lerStorage`, `gravarStorage` e `alterarStorage` (ler, alterar e gravar o que a função devolver), com o `try/catch` de contexto invalidado e a leitura do `lastError` embutidos. Usados em `marcarTelaFalhando`, `limparTelaFalhando`, `lembrarOrigem`, `atualizarEmSegundoPlano`, `salvarDiagnostico` e `registrarErro` (coletor), em `atualizar` (painel), em `marcarConferencia`, `desenhar`, "Limpar", "Copiar conferência" e o relatório (popup) e no ícone (SW). |
+| Mudanças pequenas de comportamento | (1) No plano B, o aviso verde sai depois de gravar também o histórico, alguns milissegundos mais tarde. (2) Exceção ao coletar o período para o diagnóstico ia para o nada; agora vira `registrarErro`, como qualquer erro da leitura. |
+| Testes | Harness +7 → **314/314**: leitura malformada recusada, a fila segue depois dela, `alterarStorage` grava, chama o `depois`, não grava quando nada é devolvido nem quando há exceção, e sem contexto os helpers devolvem `false`. Reprova provada: sem a proteção do `mesclar`, o harness quebra. Navegador **71/71**, Edge **30/30**. Versão continua 0.2.7. |
+
 ### Lote 35 — enxugar comentários e duplicações pequenas (28/09/2026)
 
 Pedido do Pedro ("enxugar o código"). **Comportamento não muda.** O JS de `src/` foi de
@@ -677,7 +690,7 @@ da nova e comparou só o código. As únicas diferenças são as da linha "Dupli
 | Comentários | Saiu a **história** ("antes era X", "no lote N mudou"), que já mora neste arquivo e no git. Ficou o **porquê atual** de cada regra. Tudo sem acento, como antes. |
 | Duplicações | `extensaoViva()` era idêntica no `coletor.js` e no `content.js` e agora mora só no `gravacao.js` (o único arquivo carregado nos dois lados). `ehDaExtensao()` + `SELETOR_DA_EXTENSAO` no `leitura.js` trocam 7 cópias de `closest("#mlmetrics-painel, #mlmetrics-aviso")`. O `calculo.js` usa o `PADRAO_CODIGO` do `leitura.js`, em vez de uma cópia. O `content.js` chama `removerPainel()` onde o repetia. |
 | Testes | O harness passa `MLMetricsLeitura` para o `calculo.js` e ganhou sozinho o caso de ordem do manifest → **307/307**. Navegador **71/71**, Edge **30/30** (com `--extensao=` apontando para a pasta). `manifest.json` continua **0.2.7**. |
-| Próximos | Dos que foram levantados, falta ainda: plano B igual ao SW (`gravarNestaAba`/`gravarHistoricoNestaAba` × `gravarNaFila`/`gravarHistorico`), helper de ler-alterar-gravar no storage, TreeWalker único e remover a busca automática desligada (decisão do Pedro). |
+| Próximos | Plano B e helper de storage feitos no lote 36. Falta: TreeWalker único e remover a busca automática desligada (decisão do Pedro). |
 
 ### Lote 33 — venda arredondada vira piso, não silêncio (25/09/2026)
 
@@ -918,6 +931,7 @@ paramos.
 | 32 — Painel em qualquer anúncio | ✅ feito | 25/09/2026 | Pedido do Pedro. Em página de produto, sem nada capturado, o painel mostra o "N vendido" lido **da própria página** (`vendidosDaPagina` no `leitura.js`), sem gravar, dizendo de onde veio. Só palavra "vendido", número exato, "+N" recusado, dois valores diferentes = nada. Visitas ali não existem. Harness **300/300**, navegador **69/69**, Edge **30/30** (inclusive na página real salva). `manifest.json` → **0.2.6**. |
 | 33 — Venda arredondada como piso | ✅ feito | 25/09/2026 | Anúncio com "Novo \| +25 vendidos" ficava sem painel. `vendidosDaPagina` passou a usar o subtítulo (condição + vendidos) como âncora — o que separa o número do anúncio dos "+N" das vitrines — e o painel mostra "+25" e "a partir de R$ …". "+10mil" continua fora. Harness **306/306**, navegador **71/71**, Edge **30/30**. `manifest.json` → **0.2.7**. |
 | 35 — Enxugar comentários | ✅ feito | 28/09/2026 | Pedido do Pedro. Comentários só com o porquê atual. `extensaoViva`, `ehDaExtensao` e `PADRAO_CODIGO` num lugar só. JS de 4.737 → 3.941 linhas, código comparado sem comentários: só as mudanças pretendidas. Harness **307/307**, navegador **71/71**, Edge **30/30**. Versão continua 0.2.7. |
+| 36 — Plano B = SW + storage | ✅ feito | 28/09/2026 | Pedido do Pedro. A gravação completa (`gravarNaFila`) e os helpers `lerStorage`/`gravarStorage`/`alterarStorage` ficam no `gravacao.js`, e SW, aba e popup usam os mesmos. Fecha a fila do plano B que travava com leitura malformada. JS de 3.941 → 3.868 linhas. Harness **314/314**, navegador **71/71**, Edge **30/30**. |
 | 34 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
 | ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.7: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |

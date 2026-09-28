@@ -1516,6 +1516,52 @@ async function testesDoServiceWorker() {
   testar("SW: o icone mostra quantos anuncios tem numero conferivel", "2",
     chromeSW.icone.texto);
 
+  // --- Acesso ao storage do gravacao.js (lote 36) ---------------------------
+  // O plano B da aba e o service worker gravam pela MESMA funcao
+  // (gravarNaFila). Antes, a copia da aba nao protegia o mesclar: uma leitura
+  // malformada lancava dentro do callback, a promessa nunca resolvia e a fila
+  // daquela aba travava para sempre.
+  const G = globalThis.MLMetricsGravacao;
+  const esperarStorage = function () {
+    return new Promise(function (resolve) { setTimeout(resolve, 30); });
+  };
+
+  const malformada = await G.gravarNaFila({ MLB7: null }, false);
+  testar("storage: leitura malformada e recusada sem gravar", false, malformada.ok);
+
+  const depoisDaMalformada = await G.gravarNaFila(
+    { MLB7: { visitas: 7, origem: { visitas: origemDe("d") } } }, false);
+  testar("storage: a fila segue depois de uma leitura malformada", "true/1",
+    depoisDaMalformada.ok + "/" + depoisDaMalformada.mudancas);
+
+  let chamouDepois = false;
+  G.alterarStorage(["mlmetrics_conferencia"], function (guardado) {
+    const atual = guardado.mlmetrics_conferencia || {};
+    atual.MLB1 = { resultado: "bate" };
+    return { mlmetrics_conferencia: atual };
+  }, function () { chamouDepois = true; });
+  await esperarStorage();
+  testar("storage: alterarStorage grava o que a funcao devolve", "bate",
+    (chromeSW.armazem.mlmetrics_conferencia || {}).MLB1 &&
+      chromeSW.armazem.mlmetrics_conferencia.MLB1.resultado);
+  testar("storage: e chama o depois", true, chamouDepois);
+
+  G.alterarStorage(["mlmetrics_conferencia"], function () { return undefined; });
+  G.alterarStorage(["mlmetrics_conferencia"], function () { throw new Error("formato"); });
+  await esperarStorage();
+  testar("storage: nada devolvido ou excecao = nada gravado", "MLB1",
+    Object.keys(chromeSW.armazem.mlmetrics_conferencia || {}).join(","));
+
+  // Extensao recarregada com a aba aberta: chrome.storage some e o acesso
+  // lanca. Os helpers dizem que nao deu, sem derrubar quem chamou.
+  globalThis.chrome = {};
+  const lido = G.lerStorage(["x"], function () {});
+  const gravado = G.gravarStorage({ x: 1 });
+  const semContexto = await G.gravarNaFila({ MLB8: { visitas: 1 } }, false);
+  globalThis.chrome = chromeSW;
+  testar("storage: sem contexto, ler e gravar devolvem false", "false/false", lido + "/" + gravado);
+  testar("storage: sem contexto, a gravacao da fila responde ok false", false, semContexto.ok);
+
   const buscaFora = await chromeSW.enviar({ tipo: "buscar", url: "https://example.com/" }, daExtensao);
   testar("SW: busca fora do dominio do ML e recusada", false, buscaFora.ok);
 

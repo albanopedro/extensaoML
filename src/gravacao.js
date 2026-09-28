@@ -1,15 +1,21 @@
 // ============================================================================
-// GRAVACAO - a regra de juntar o que uma tela leu com o que ja estava guardado
+// GRAVACAO - tudo o que toca no chrome.storage da extensao
 //
-// Aqui fica so a REGRA, sem chrome.storage - a do cache (mesclar) e a do
-// historico diario (registrarDia) - e os NOMES das chaves do storage (CHAVES),
-// que todo o resto usa daqui. O arquivo e carregado:
+// Tres partes:
+//   - os NOMES das chaves do storage (CHAVES), que todo o resto usa daqui;
+//   - a REGRA de juntar o que uma tela leu com o que ja estava guardado - a
+//     do cache (mesclar) e a do historico diario (registrarDia). Pura, sem
+//     storage;
+//   - o ACESSO ao storage: ler, gravar, alterar e a gravacao completa de uma
+//     varredura, na fila (gravarNaFila).
+//
+// O arquivo e carregado:
 //   - no service worker (importScripts), que faz a gravacao de verdade, uma
 //     de cada vez, para duas abas nao apagarem o que a outra gravou (#21);
 //   - nas abas (manifest), onde serve de plano B quando o service worker nao
-//     responde;
+//     responde - pela MESMA funcao, nao por uma copia;
 //   - no popup.
-// Por nao tocar no storage, e testado em Node (teste/test-parsing.js).
+// Testado em Node (teste/test-parsing.js), com um chrome falso para o acesso.
 // ============================================================================
 
 var MLMetricsGravacao = (function () {
@@ -270,6 +276,231 @@ var MLMetricsGravacao = (function () {
     return alterou;
   }
 
+  // --------------------------------------------------------------------------
+  // Acesso ao storage
+  //
+  // Daqui para baixo as funcoes usam chrome.storage.local, sempre do mesmo
+  // jeito: toda chamada protegida contra contexto invalidado (extensao
+  // recarregada com a aba aberta) e todo callback lendo o lastError. Falha de
+  // storage nunca derruba quem chamou - a proxima leitura ou gravacao tenta
+  // de novo. No teste em Node, rodam com um chrome falso.
+  // --------------------------------------------------------------------------
+
+  /**
+   * O erro da ultima chamada ao storage, ou undefined. Ler e obrigatorio:
+   * sem isso o navegador reclama de "Unchecked runtime.lastError".
+   *
+   * @returns {Object|undefined}
+   */
+  function erroDoStorage() {
+    try {
+      return chrome.runtime.lastError;
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  /**
+   * Le chaves do storage e entrega o que achou. Com erro, nao chama nada.
+   *
+   * @param {string[]|null} chaves null = o storage inteiro
+   * @param {Function} usar recebe { chave: valor }
+   * @returns {boolean} false quando nem deu para pedir (contexto invalidado)
+   */
+  function lerStorage(chaves, usar) {
+    try {
+      chrome.storage.local.get(chaves, function (guardado) {
+        if (erroDoStorage()) return;
+        usar(guardado);
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * Grava chaves no storage.
+   *
+   * @param {Object} objeto { chave: valor }
+   * @param {Function} [depois] chamada so quando gravou
+   * @returns {boolean} false quando nem deu para pedir (contexto invalidado)
+   */
+  function gravarStorage(objeto, depois) {
+    try {
+      chrome.storage.local.set(objeto, function () {
+        if (erroDoStorage()) return;
+        if (depois) depois();
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * Le chaves, deixa "alterar" decidir e grava o que ela devolver.
+   *
+   * @param {string[]} chaves
+   * @param {Function} alterar recebe o guardado; devolve { chave: valor } a
+   *                           gravar, ou nada para nao gravar
+   * @param {Function} [depois] chamada so quando gravou
+   */
+  function alterarStorage(chaves, alterar, depois) {
+    lerStorage(chaves, function (guardado) {
+      let novo;
+
+      try {
+        novo = alterar(guardado);
+      } catch (e) {
+        return;  // formato inesperado no storage: nao grava nada
+      }
+
+      if (novo) gravarStorage(novo, depois);
+    });
+  }
+
+  /**
+   * Le o cache, mescla a leitura, grava e anota o historico diario - a
+   * gravacao completa de uma varredura. Quem chama e o service worker (a
+   * gravacao de verdade) e a aba, no plano B.
+   *
+   * O historico vem DEPOIS do cache, numa gravacao separada. Se ele falhar, o
+   * cache ja esta gravado: o historico nunca e o motivo de perder uma leitura.
+   *
+   * @param {Object} novos o que a varredura leu, por codigo de anuncio
+   * @param {boolean} automatica true quando veio da busca em segundo plano
+   * @returns {Promise<Object>} { ok, mudancas } ou { ok: false, motivo? } -
+   *                            nunca rejeita
+   */
+  function gravarLeitura(novos, automatica) {
+    return new Promise(function (resolve) {
+      try {
+        chrome.storage.local.get([CHAVES.CACHE], function (guardado) {
+          if (erroDoStorage()) {
+            resolve({ ok: false });
+            return;
+          }
+
+          const cache = guardado[CHAVES.CACHE] || {};
+          const agora = Date.now();
+          let resultado;
+
+          try {
+            resultado = mesclar(cache, novos, agora, automatica);
+          } catch (e) {
+            resolve({ ok: false });  // leitura malformada: nao grava nada
+            return;
+          }
+
+          if (resultado.mudancas.length === 0 && resultado.renovados.length === 0) {
+            resolve({ ok: true, mudancas: 0 });
+            return;
+          }
+
+          chrome.storage.local.set({ [CHAVES.CACHE]: cache }, function () {
+            const erro = erroDoStorage();
+
+            // Quota estourada ou contexto invalidado: nao da para gravar.
+            if (erro) {
+              resolve({ ok: false, motivo: erro.message });
+              return;
+            }
+
+            const resposta = { ok: true, mudancas: resultado.mudancas.length };
+            gravarHistorico(novos, agora, automatica, function () {
+              resolve(resposta);
+            });
+          });
+        });
+      } catch (e) {
+        resolve({ ok: false });  // contexto invalidado
+      }
+    });
+  }
+
+  /**
+   * Anota a leitura de cada anuncio no historico diario dele (registrarDia),
+   * gravando so as chaves que mudaram.
+   *
+   * So e chamada quando o cache mudou ou foi renovado. Perto da meia-noite, o
+   * dia novo so ganha registro na leitura seguinte - nao compensa uma regra so
+   * para isso.
+   *
+   * @param {Object} novos
+   * @param {number} agora
+   * @param {boolean} automatica
+   * @param {Function} pronto chamada sempre - a fila depende dela para andar
+   */
+  function gravarHistorico(novos, agora, automatica, pronto) {
+    const codigos = Object.keys(novos);
+    const chaves = codigos.map(chaveDoHistorico);
+
+    try {
+      chrome.storage.local.get(chaves, function (guardado) {
+        if (erroDoStorage()) {
+          pronto();
+          return;
+        }
+
+        const alterados = {};
+
+        try {
+          codigos.forEach(function (codigo) {
+            const chave = chaveDoHistorico(codigo);
+            const historico = guardado[chave] || {};
+
+            if (registrarDia(historico, novos[codigo], agora, automatica)) {
+              alterados[chave] = historico;
+            }
+          });
+        } catch (e) {
+          pronto();  // formato inesperado: sem historico desta vez
+          return;
+        }
+
+        if (Object.keys(alterados).length === 0) {
+          pronto();
+          return;
+        }
+
+        chrome.storage.local.set(alterados, function () {
+          const erro = erroDoStorage();
+          if (erro) {
+            console.warn("[ML METRICS] nao consegui gravar o historico: " + erro.message);
+          }
+          pronto();
+        });
+      });
+    } catch (e) {
+      pronto();  // contexto invalidado
+    }
+  }
+
+  // Fila de gravacao deste contexto: cada gravacao so comeca quando a
+  // anterior terminou, sem que outra entre no meio do ler-mesclar-gravar. No
+  // service worker, que e um so, a fila vale para todas as abas (#21); numa
+  // aba, so para as gravacoes dela (plano B).
+  let filaDeGravacao = Promise.resolve();
+
+  /**
+   * Poe uma gravacao (gravarLeitura) na fila deste contexto.
+   *
+   * @param {Object} novos
+   * @param {boolean} automatica
+   * @returns {Promise<Object>} a resposta de gravarLeitura - nunca rejeita
+   */
+  function gravarNaFila(novos, automatica) {
+    const tarefa = filaDeGravacao.then(function () {
+      return gravarLeitura(novos, automatica);
+    });
+
+    // A fila segue mesmo que algo de errado aconteca nesta tarefa.
+    filaDeGravacao = tarefa.catch(function () {});
+
+    return tarefa;
+  }
+
   /**
    * Diz se a extensao ainda esta viva para o script desta aba.
    *
@@ -300,6 +531,11 @@ var MLMetricsGravacao = (function () {
     chaveDoHistorico: chaveDoHistorico,
     diaDe: diaDe,
     registrarDia: registrarDia,
+    lerStorage: lerStorage,
+    gravarStorage: gravarStorage,
+    alterarStorage: alterarStorage,
+    gravarLeitura: gravarLeitura,
+    gravarNaFila: gravarNaFila,
     extensaoViva: extensaoViva
   };
 })();

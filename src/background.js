@@ -5,8 +5,8 @@
 //
 //   "salvar" - grava o que uma aba leu. O service worker e um so para todas
 //              as abas e grava uma leitura de cada vez, entao duas abas do ML
-//              nao apagam o que a outra acabou de gravar (#21). A regra da
-//              mesclagem mora em gravacao.js.
+//              nao apagam o que a outra acabou de gravar (#21). A gravacao
+//              inteira (gravarNaFila) mora em gravacao.js.
 //
 //   "buscar" - busca o HTML de uma tela de vendedor com a sessao dela, para a
 //              atualizacao automatica - hoje DESLIGADA no coletor.js
@@ -41,119 +41,6 @@ function enderecoPermitido(url) {
   } catch (e) {
     return false;
   }
-}
-
-// Fila unica de gravacao: le, mescla e grava sem que outra aba entre no meio.
-let filaDeGravacao = Promise.resolve();
-
-/**
- * Poe uma gravacao na fila e devolve a resposta para a aba.
- *
- * @param {Object} novos o que a varredura leu, por codigo de anuncio
- * @param {boolean} automatica true quando veio da busca em segundo plano
- * @returns {Promise<Object>} ok e quantos anuncios mudaram - nunca rejeita
- */
-function gravarNaFila(novos, automatica) {
-  const tarefa = filaDeGravacao.then(function () {
-    return new Promise(function (resolve) {
-      chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
-        if (chrome.runtime.lastError) {
-          resolve({ ok: false });
-          return;
-        }
-
-        const cache = guardado[CHAVE_CACHE] || {};
-        const agora = Date.now();
-        let resultado;
-
-        try {
-          resultado = MLMetricsGravacao.mesclar(cache, novos, agora, automatica);
-        } catch (e) {
-          resolve({ ok: false });  // mensagem malformada: nao grava nada
-          return;
-        }
-
-        if (resultado.mudancas.length === 0 && resultado.renovados.length === 0) {
-          resolve({ ok: true, mudancas: 0 });
-          return;
-        }
-
-        chrome.storage.local.set({ [CHAVE_CACHE]: cache }, function () {
-          if (chrome.runtime.lastError) {
-            resolve({ ok: false, motivo: chrome.runtime.lastError.message });
-            return;
-          }
-
-          // O historico vem DEPOIS do cache, na mesma tarefa da fila. Se ele
-          // falhar, o cache ja esta gravado: o historico nunca e o motivo de
-          // perder uma leitura.
-          const resposta = { ok: true, mudancas: resultado.mudancas.length };
-          gravarHistorico(novos, agora, automatica, function () {
-            resolve(resposta);
-          });
-        });
-      });
-    });
-  });
-
-  // A fila segue mesmo que algo de errado aconteca nesta tarefa.
-  filaDeGravacao = tarefa.catch(function () {});
-
-  return tarefa;
-}
-
-/**
- * Anota a leitura de cada anuncio no historico diario dele (registrarDia no
- * gravacao.js), gravando so as chaves que mudaram.
- *
- * So e chamada quando o cache mudou ou foi renovado. Perto da meia-noite, o
- * dia novo so ganha registro na leitura seguinte - nao compensa uma regra so
- * para isso.
- *
- * @param {Object} novos o que a varredura leu, por codigo de anuncio
- * @param {number} agora
- * @param {boolean} automatica
- * @param {Function} pronto chamada sempre - a fila depende dela para andar
- */
-function gravarHistorico(novos, agora, automatica, pronto) {
-  const codigos = Object.keys(novos);
-  const chaves = codigos.map(MLMetricsGravacao.chaveDoHistorico);
-
-  chrome.storage.local.get(chaves, function (guardado) {
-    if (chrome.runtime.lastError) {
-      pronto();
-      return;
-    }
-
-    const alterados = {};
-
-    try {
-      codigos.forEach(function (codigo) {
-        const chave = MLMetricsGravacao.chaveDoHistorico(codigo);
-        const historico = guardado[chave] || {};
-
-        if (MLMetricsGravacao.registrarDia(historico, novos[codigo], agora, automatica)) {
-          alterados[chave] = historico;
-        }
-      });
-    } catch (e) {
-      pronto();
-      return;
-    }
-
-    if (Object.keys(alterados).length === 0) {
-      pronto();
-      return;
-    }
-
-    chrome.storage.local.set(alterados, function () {
-      if (chrome.runtime.lastError) {
-        console.warn("[ML METRICS] nao consegui gravar o historico: " +
-          chrome.runtime.lastError.message);
-      }
-      pronto();
-    });
-  });
 }
 
 /**
@@ -206,7 +93,8 @@ chrome.runtime.onMessage.addListener(function (mensagem, remetente, responder) {
       return false;
     }
 
-    gravarNaFila(mensagem.novos, Boolean(mensagem.automatica)).then(responder);
+    // A fila do gravacao.js: no service worker ela e uma so para todas as abas.
+    MLMetricsGravacao.gravarNaFila(mensagem.novos, Boolean(mensagem.automatica)).then(responder);
 
     // Canal assincrono: sem este "true" a resposta nunca chega a aba.
     return true;
@@ -255,11 +143,6 @@ chrome.storage.onChanged.addListener(function (mudancas, area) {
 
 // O service worker e desligado quando fica ocioso e o numero do icone volta
 // zerado depois de um reinicio do navegador: reconferido a cada acordada.
-try {
-  chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
-    if (chrome.runtime.lastError) return;
-    atualizarDistintivo(guardado[CHAVE_CACHE]);
-  });
-} catch (e) {
-  // contexto invalidado durante a atualizacao da extensao
-}
+MLMetricsGravacao.lerStorage([CHAVE_CACHE], function (guardado) {
+  atualizarDistintivo(guardado[CHAVE_CACHE]);
+});

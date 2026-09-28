@@ -148,23 +148,14 @@
    * @param {string|null} valor "bate", "nao" ou null para desmarcar
    */
   function marcarConferencia(codigo, valor) {
-    try {
-      chrome.storage.local.get([CHAVE_CONFERENCIA], function (guardado) {
-        if (chrome.runtime.lastError) return;
+    MLMetricsGravacao.alterarStorage([CHAVE_CONFERENCIA], function (guardado) {
+      const conferencia = guardado[CHAVE_CONFERENCIA] || {};
 
-        const conferencia = guardado[CHAVE_CONFERENCIA] || {};
+      if (valor === null) delete conferencia[codigo];
+      else conferencia[codigo] = { resultado: valor, quando: Date.now() };
 
-        if (valor === null) delete conferencia[codigo];
-        else conferencia[codigo] = { resultado: valor, quando: Date.now() };
-
-        chrome.storage.local.set({ [CHAVE_CONFERENCIA]: conferencia }, function () {
-          if (chrome.runtime.lastError) return;
-          desenhar();
-        });
-      });
-    } catch (e) {
-      // contexto invalidado: o popup inteiro e recarregado pelo navegador
-    }
+      return { [CHAVE_CONFERENCIA]: conferencia };
+    }, desenhar);
   }
 
   /**
@@ -283,53 +274,47 @@
    * Le o storage e desenha o estado atual.
    */
   function desenhar() {
-    try {
-      chrome.storage.local.get(
-        [CHAVE_CACHE, CHAVE_DIAGNOSTICO, CHAVE_ERRO, CHAVE_CONFERENCIA, CHAVE_TELAS_FALHANDO],
-        function (guardado) {
-          if (chrome.runtime.lastError) return;
+    MLMetricsGravacao.lerStorage(
+      [CHAVE_CACHE, CHAVE_DIAGNOSTICO, CHAVE_ERRO, CHAVE_CONFERENCIA, CHAVE_TELAS_FALHANDO],
+      function (guardado) {
+        mostrarErro(guardado[CHAVE_ERRO]);
+        mostrarTelasFalhando(guardado[CHAVE_TELAS_FALHANDO]);
 
-          mostrarErro(guardado[CHAVE_ERRO]);
-          mostrarTelasFalhando(guardado[CHAVE_TELAS_FALHANDO]);
+        const conferencia = guardado[CHAVE_CONFERENCIA] || {};
+        const cache = guardado[CHAVE_CACHE] || {};
+        const codigos = Object.keys(cache);
 
-          const conferencia = guardado[CHAVE_CONFERENCIA] || {};
-          const cache = guardado[CHAVE_CACHE] || {};
-          const codigos = Object.keys(cache);
+        lista.textContent = "";
 
-          lista.textContent = "";
-
-          if (codigos.length === 0) {
-            resumo.textContent =
-              "Nenhum anúncio capturado ainda. Abra \"Minhas publicações\" " +
-              "no Mercado Livre e espere a lista carregar por completo.";
-            return;
-          }
-
-          // Registro sem rastro nenhum veio de versao antiga e nao aparece no
-          // painel: contado a parte, para a pessoa saber que "Limpar" resolve.
-          const semOrigem = codigos.filter(function (codigo) {
-            const origem = cache[codigo].origem || {};
-            return !origem.visitas && !origem.vendas;
-          }).length;
-
-          const marcados = Object.keys(conferencia).length;
-
-          resumo.textContent = codigos.length + " anúncio(s) com dados guardados." +
-            (marcados > 0 ? " " + marcados + " conferido(s)." : "") +
-            (semOrigem > 0
-              ? " " + semOrigem + " sem origem (de versão antiga): use " +
-                "\"Limpar dados guardados\"."
-              : "");
-
-          codigos.forEach(function (codigo) {
-            const marca = conferencia[codigo] ? conferencia[codigo].resultado : undefined;
-            lista.appendChild(criarItem(codigo, cache[codigo], marca));
-          });
+        if (codigos.length === 0) {
+          resumo.textContent =
+            "Nenhum anúncio capturado ainda. Abra \"Minhas publicações\" " +
+            "no Mercado Livre e espere a lista carregar por completo.";
+          return;
         }
-      );
-    } catch (e) {
-      // contexto invalidado: popup inteiro e recarregado pelo navegador
-    }
+
+        // Registro sem rastro nenhum veio de versao antiga e nao aparece no
+        // painel: contado a parte, para a pessoa saber que "Limpar" resolve.
+        const semOrigem = codigos.filter(function (codigo) {
+          const origem = cache[codigo].origem || {};
+          return !origem.visitas && !origem.vendas;
+        }).length;
+
+        const marcados = Object.keys(conferencia).length;
+
+        resumo.textContent = codigos.length + " anúncio(s) com dados guardados." +
+          (marcados > 0 ? " " + marcados + " conferido(s)." : "") +
+          (semOrigem > 0
+            ? " " + semOrigem + " sem origem (de versão antiga): use " +
+              "\"Limpar dados guardados\"."
+            : "");
+
+        codigos.forEach(function (codigo) {
+          const marca = conferencia[codigo] ? conferencia[codigo].resultado : undefined;
+          lista.appendChild(criarItem(codigo, cache[codigo], marca));
+        });
+      }
+    );
   }
 
   /**
@@ -490,23 +475,17 @@
     // Apaga TODAS as chaves que comecam com PREFIXO_CHAVES, e nada alem delas.
     // Pelo prefixo, chave nova ja nasce coberta - listar uma a uma ja deixou
     // origens envenenadas sobreviverem a limpeza.
-    try {
-      chrome.storage.local.get(null, function (tudo) {
-        if (chrome.runtime.lastError) return;
-
-        const nossas = Object.keys(tudo).filter(function (chave) {
-          return chave.indexOf(PREFIXO_CHAVES) === 0;
-        });
-
-        chrome.storage.local.remove(nossas, function () {
-          if (chrome.runtime.lastError) return;
-          avisar("Dados apagados.");
-          desenhar();
-        });
+    MLMetricsGravacao.lerStorage(null, function (tudo) {
+      const nossas = Object.keys(tudo).filter(function (chave) {
+        return chave.indexOf(PREFIXO_CHAVES) === 0;
       });
-    } catch (e) {
-      // contexto invalidado: popup inteiro e recarregado pelo navegador
-    }
+
+      chrome.storage.local.remove(nossas, function () {
+        if (chrome.runtime.lastError) return;
+        avisar("Dados apagados.");
+        desenhar();
+      });
+    });
   });
 
   /**
@@ -528,18 +507,12 @@
   }
 
   document.getElementById("conferencia").addEventListener("click", function () {
-    try {
-      chrome.storage.local.get([CHAVE_CACHE, CHAVE_CONFERENCIA], function (guardado) {
-        if (chrome.runtime.lastError) return;
-
-        entregarTexto(textoDaConferencia(
-          guardado[CHAVE_CACHE] || {},
-          guardado[CHAVE_CONFERENCIA] || {}
-        ));
-      });
-    } catch (e) {
-      // contexto invalidado: popup inteiro e recarregado pelo navegador
-    }
+    MLMetricsGravacao.lerStorage([CHAVE_CACHE, CHAVE_CONFERENCIA], function (guardado) {
+      entregarTexto(textoDaConferencia(
+        guardado[CHAVE_CACHE] || {},
+        guardado[CHAVE_CONFERENCIA] || {}
+      ));
+    });
   });
 
   document.getElementById("copiar").addEventListener("click", function () {
@@ -555,38 +528,29 @@
    * @param {Object} telaAtual resposta da aba ativa, ou o motivo do silencio
    */
   function montarRelatorio(telaAtual) {
-    try {
-      // null = o storage inteiro: o historico e uma chave por anuncio.
-      chrome.storage.local.get(
-        null,
-        function (guardado) {
-          if (chrome.runtime.lastError) return;
+    // null = o storage inteiro: o historico e uma chave por anuncio.
+    MLMetricsGravacao.lerStorage(null, function (guardado) {
+      // Indentacao 2: texto legivel para colar numa conversa.
+      const relatorio = JSON.stringify({
+        versao: chrome.runtime.getManifest().version,
+        geradoEm: new Date().toISOString(),
+        telaAtual: telaAtual,
+        // Quando existe, e a explicacao mais provavel para "nao apareceu
+        // nada" - por isso vem cedo.
+        ultimoErro: guardado[CHAVE_ERRO] || null,
+        // As telas de vendedor reconhecidas, mascaradas.
+        origens: (guardado[CHAVE_ORIGENS] || []).map(enderecoMascarado),
+        capturado: guardado[CHAVE_CACHE] || {},
+        historico: resumirHistorico(guardado),
+        conferencia: guardado[CHAVE_CONFERENCIA] || {},
+        telasFalhando: guardado[CHAVE_TELAS_FALHANDO] || {},
+        // O ultimo diagnostico gravado sozinho, de qualquer aba - pode ser de
+        // outra tela, por isso a telaAtual vem antes.
+        ultimoDiagnosticoGuardado: guardado[CHAVE_DIAGNOSTICO] || null
+      }, null, 2);
 
-          // Indentacao 2: texto legivel para colar numa conversa.
-          const relatorio = JSON.stringify({
-            versao: chrome.runtime.getManifest().version,
-            geradoEm: new Date().toISOString(),
-            telaAtual: telaAtual,
-            // Quando existe, e a explicacao mais provavel para "nao apareceu
-            // nada" - por isso vem cedo.
-            ultimoErro: guardado[CHAVE_ERRO] || null,
-            // As telas de vendedor reconhecidas, mascaradas.
-            origens: (guardado[CHAVE_ORIGENS] || []).map(enderecoMascarado),
-            capturado: guardado[CHAVE_CACHE] || {},
-            historico: resumirHistorico(guardado),
-            conferencia: guardado[CHAVE_CONFERENCIA] || {},
-            telasFalhando: guardado[CHAVE_TELAS_FALHANDO] || {},
-            // O ultimo diagnostico gravado sozinho, de qualquer aba - pode ser
-            // de outra tela, por isso a telaAtual vem antes.
-            ultimoDiagnosticoGuardado: guardado[CHAVE_DIAGNOSTICO] || null
-          }, null, 2);
-
-          entregarTexto(relatorio);
-        }
-      );
-    } catch (e) {
-      // contexto invalidado: popup inteiro e recarregado pelo navegador
-    }
+      entregarTexto(relatorio);
+    });
   }
 
   desenhar();

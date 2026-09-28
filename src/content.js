@@ -358,45 +358,41 @@
 
     if (chaveNoInicio === fechadoPara) return;
 
-    try {
-      chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
-        if (chrome.runtime.lastError) return;
+    const pediu = MLMetricsGravacao.lerStorage([CHAVE_CACHE], function (guardado) {
+      if (chaveDaPagina() !== chaveNoInicio) return;
+      if (chaveNoInicio === fechadoPara) return;
 
-        if (chaveDaPagina() !== chaveNoInicio) return;
-        if (chaveNoInicio === fechadoPara) return;
+      const cache = guardado[CHAVE_CACHE] || {};
 
-        const cache = guardado[CHAVE_CACHE] || {};
+      // O primeiro candidato da pagina com numero COM rastro de origem.
+      const escolha = MLMetricsCalculo.escolherRegistro(chaveNoInicio.split("|"), cache);
 
-        // O primeiro candidato da pagina com numero COM rastro de origem.
-        const escolha = MLMetricsCalculo.escolherRegistro(chaveNoInicio.split("|"), cache);
+      if (!escolha) {
+        // Sem dado capturado: em pagina de produto ainda da para mostrar o
+        // "N vendido" dela. Fora isso, nenhum painel (nao existe painel "Sem
+        // dados", #46) - e um painel antigo sai, como depois de "Limpar dados
+        // guardados".
+        if (!mostrarOQueAPaginaDiz()) removerPainel();
+        return;
+      }
 
-        if (!escolha) {
-          // Sem dado capturado: em pagina de produto ainda da para mostrar o
-          // "N vendido" dela. Fora isso, nenhum painel (nao existe painel
-          // "Sem dados", #46) - e um painel antigo sai, como depois de
-          // "Limpar dados guardados".
-          if (!mostrarOQueAPaginaDiz()) removerPainel();
-          return;
-        }
+      const provado = escolha.provado;
 
-        const provado = escolha.provado;
+      // A idade exibida e a da leitura MAIS ANTIGA do painel: visitas de hoje
+      // com vendas de 10 dias atras e dado de 10 dias.
+      const datas = Object.keys(provado.origem)
+        .map(function (metrica) { return provado.origem[metrica].em; })
+        .filter(Boolean);
+      const idade = datas.length > 0
+        ? Math.min.apply(null, datas)
+        : cache[escolha.codigo].capturadoEm;
 
-        // A idade exibida e a da leitura MAIS ANTIGA do painel: visitas de
-        // hoje com vendas de 10 dias atras e dado de 10 dias.
-        const datas = Object.keys(provado.origem)
-          .map(function (metrica) { return provado.origem[metrica].em; })
-          .filter(Boolean);
-        const idade = datas.length > 0
-          ? Math.min.apply(null, datas)
-          : cache[escolha.codigo].capturadoEm;
+      const preco = lerPreco();
+      montarPainel(MLMetricsCalculo.calcular(provado, preco), idade, provado.origem, preco);
+    });
 
-        const preco = lerPreco();
-        montarPainel(MLMetricsCalculo.calcular(provado, preco), idade, provado.origem, preco);
-      });
-    } catch (e) {
-      // contexto invalidado: o painel antigo sai, a proxima leitura tenta.
-      removerPainel();
-    }
+    // Contexto invalidado: o painel antigo sai, a proxima leitura tenta.
+    if (!pediu) removerPainel();
   }
 
   atualizar();

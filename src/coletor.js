@@ -14,7 +14,6 @@
 (function () {
   "use strict";
 
-  const CHAVE_CACHE = MLMetricsGravacao.CHAVES.CACHE;
   const CHAVE_DIAGNOSTICO = MLMetricsGravacao.CHAVES.DIAGNOSTICO;
   const CHAVE_ERRO = MLMetricsGravacao.CHAVES.ERRO;
   const CHAVE_ORIGENS = MLMetricsGravacao.CHAVES.ORIGENS;
@@ -113,116 +112,23 @@
     }
   }
 
-  // Fila do plano B: duas gravacoes da MESMA aba nao se pisam. Entre abas
-  // quem garante a ordem e o service worker.
-  let filaDoCache = Promise.resolve();
-
   /**
-   * Plano B: le, mescla e grava o cache daqui mesmo, sem o service worker.
-   * Erro de storage (contexto invalidado, quota) termina a tarefa em
-   * silencio, e a proxima gravacao tenta de novo.
+   * Plano B: grava daqui mesmo, sem o service worker - pela MESMA funcao que
+   * ele usa (gravarNaFila, no gravacao.js), na fila desta aba. Erro de
+   * storage termina a tarefa em silencio, e a proxima gravacao tenta de novo.
    *
    * @param {Object} novos
    * @param {boolean} emSegundoPlano
    * @param {Function} pronto recebe quantos anuncios mudaram, depois de gravar
    */
   function gravarNestaAba(novos, emSegundoPlano, pronto) {
-    filaDoCache = filaDoCache.then(function () {
-      return new Promise(function (resolve) {
-        try {
-          chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
-            if (chrome.runtime.lastError) {
-              resolve();
-              return;
-            }
-
-            const cache = guardado[CHAVE_CACHE] || {};
-            const agora = Date.now();
-            const resultado = MLMetricsGravacao.mesclar(cache, novos, agora, emSegundoPlano);
-
-            if (resultado.mudancas.length === 0 && resultado.renovados.length === 0) {
-              resolve();
-              return;
-            }
-
-            chrome.storage.local.set({ [CHAVE_CACHE]: cache }, function () {
-              if (chrome.runtime.lastError) {
-                console.warn(
-                  "[ML METRICS] nao consegui gravar o cache: " +
-                  chrome.runtime.lastError.message
-                );
-                resolve();
-                return;
-              }
-
-              pronto(resultado.mudancas.length);
-
-              // Historico diario depois do cache, na mesma fila - mesma regra
-              // do gravarHistorico do background.js.
-              gravarHistoricoNestaAba(novos, agora, emSegundoPlano, resolve);
-            });
-          });
-        } catch (e) {
-          resolve();
-        }
-      });
-    }).catch(function () {
-      // A fila nunca para: erro de uma gravacao deixa a proxima tentar.
+    MLMetricsGravacao.gravarNaFila(novos, emSegundoPlano).then(function (resposta) {
+      if (resposta.ok) {
+        pronto(resposta.mudancas);
+      } else if (resposta.motivo) {
+        console.warn("[ML METRICS] nao consegui gravar o cache: " + resposta.motivo);
+      }
     });
-  }
-
-  /**
-   * Plano B do historico diario: o mesmo que o gravarHistorico do
-   * background.js, daqui da aba (ver registrarDia no gravacao.js).
-   *
-   * @param {Object} novos
-   * @param {number} agora
-   * @param {boolean} emSegundoPlano
-   * @param {Function} pronto chamada sempre - a fila da aba depende dela
-   */
-  function gravarHistoricoNestaAba(novos, agora, emSegundoPlano, pronto) {
-    const codigos = Object.keys(novos);
-    const chaves = codigos.map(MLMetricsGravacao.chaveDoHistorico);
-
-    try {
-      chrome.storage.local.get(chaves, function (guardado) {
-        if (chrome.runtime.lastError) {
-          pronto();
-          return;
-        }
-
-        const alterados = {};
-
-        try {
-          codigos.forEach(function (codigo) {
-            const chave = MLMetricsGravacao.chaveDoHistorico(codigo);
-            const historico = guardado[chave] || {};
-
-            if (MLMetricsGravacao.registrarDia(historico, novos[codigo], agora, emSegundoPlano)) {
-              alterados[chave] = historico;
-            }
-          });
-        } catch (e) {
-          pronto();
-          return;
-        }
-
-        if (Object.keys(alterados).length === 0) {
-          pronto();
-          return;
-        }
-
-        chrome.storage.local.set(alterados, function () {
-          if (chrome.runtime.lastError) {
-            console.warn("[ML METRICS] nao consegui gravar o historico: " +
-              chrome.runtime.lastError.message);
-          }
-          pronto();
-        });
-      });
-    } catch (e) {
-      pronto();
-    }
   }
 
   /**
@@ -291,35 +197,23 @@
     if (estadoDaTela !== null) return;
     estadoDaTela = "marcada";
 
-    try {
-      chrome.storage.local.get([CHAVE_ORIGENS, CHAVE_TELAS_FALHANDO], function (guardado) {
-        if (chrome.runtime.lastError) return;
+    MLMetricsGravacao.alterarStorage([CHAVE_ORIGENS, CHAVE_TELAS_FALHANDO], function (guardado) {
+      const origens = guardado[CHAVE_ORIGENS] || [];
+      if (!MLMetricsLeitura.ehOrigemConhecida(window.location.href, origens)) return;
 
-        try {
-          const origens = guardado[CHAVE_ORIGENS] || [];
-          if (!MLMetricsLeitura.ehOrigemConhecida(window.location.href, origens)) return;
+      const tela = MLMetricsLeitura.caminhoMascarado(window.location.pathname);
+      const falhando = guardado[CHAVE_TELAS_FALHANDO] || {};
 
-          const tela = MLMetricsLeitura.caminhoMascarado(window.location.pathname);
-          const falhando = guardado[CHAVE_TELAS_FALHANDO] || {};
+      // Ja avisado: a hora da PRIMEIRA falha diz ha quanto tempo parou.
+      if (falhando[tela]) return;
 
-          // Ja avisado: a hora da PRIMEIRA falha diz ha quanto tempo parou.
-          if (falhando[tela]) return;
+      falhando[tela] = {
+        quando: Date.now(),
+        versao: chrome.runtime.getManifest().version
+      };
 
-          falhando[tela] = {
-            quando: Date.now(),
-            versao: chrome.runtime.getManifest().version
-          };
-
-          chrome.storage.local.set({ [CHAVE_TELAS_FALHANDO]: falhando }, function () {
-            if (chrome.runtime.lastError) return;
-          });
-        } catch (e) {
-          // contexto invalidado dentro do callback: o aviso nao e essencial
-        }
-      });
-    } catch (e) {
-      // contexto invalidado antes do callback
-    }
+      return { [CHAVE_TELAS_FALHANDO]: falhando };
+    });
   }
 
   /**
@@ -329,28 +223,15 @@
     if (estadoDaTela === "entregou") return;
     estadoDaTela = "entregou";
 
-    try {
-      chrome.storage.local.get([CHAVE_TELAS_FALHANDO], function (guardado) {
-        if (chrome.runtime.lastError) return;
+    MLMetricsGravacao.alterarStorage([CHAVE_TELAS_FALHANDO], function (guardado) {
+      const falhando = guardado[CHAVE_TELAS_FALHANDO] || {};
+      const tela = MLMetricsLeitura.caminhoMascarado(window.location.pathname);
 
-        try {
-          const falhando = guardado[CHAVE_TELAS_FALHANDO] || {};
-          const tela = MLMetricsLeitura.caminhoMascarado(window.location.pathname);
+      if (!falhando[tela]) return;
 
-          if (!falhando[tela]) return;
-
-          delete falhando[tela];
-
-          chrome.storage.local.set({ [CHAVE_TELAS_FALHANDO]: falhando }, function () {
-            if (chrome.runtime.lastError) return;
-          });
-        } catch (e) {
-          // contexto invalidado dentro do callback
-        }
-      });
-    } catch (e) {
-      // contexto invalidado antes do callback
-    }
+      delete falhando[tela];
+      return { [CHAVE_TELAS_FALHANDO]: falhando };
+    });
   }
 
   // --------------------------------------------------------------------------
@@ -370,29 +251,17 @@
     // expulsaria a tela de publicacoes das 3 vagas.
     if (limpa.match(MLMetricsLeitura.PADRAO_CODIGO)) return;
 
-    try {
-      chrome.storage.local.get([CHAVE_ORIGENS], function (guardado) {
-        if (chrome.runtime.lastError) return;
+    MLMetricsGravacao.alterarStorage([CHAVE_ORIGENS], function (guardado) {
+      const origens = guardado[CHAVE_ORIGENS] || [];
 
-        try {
-          const origens = guardado[CHAVE_ORIGENS] || [];
+      if (origens[0] === limpa) return;
 
-          if (origens[0] === limpa) return;
+      const atualizadas = [limpa]
+        .concat(origens.filter(function (u) { return u !== limpa; }))
+        .slice(0, 3);
 
-          const atualizadas = [limpa]
-            .concat(origens.filter(function (u) { return u !== limpa; }))
-            .slice(0, 3);
-
-          chrome.storage.local.set({ [CHAVE_ORIGENS]: atualizadas }, function () {
-            if (chrome.runtime.lastError) return;
-          });
-        } catch (e) {
-          // contexto invalidado dentro do callback
-        }
-      });
-    } catch (e) {
-      // contexto invalidado antes do callback
-    }
+      return { [CHAVE_ORIGENS]: atualizadas };
+    });
   }
 
   /**
@@ -405,54 +274,39 @@
    * captura normal segue cobrindo.
    */
   function atualizarEmSegundoPlano() {
-    try {
-      chrome.storage.local.get(
-        [CHAVE_ORIGENS, CHAVE_ULTIMA_BUSCA],
-        function (guardado) {
-          if (chrome.runtime.lastError) return;
+    MLMetricsGravacao.lerStorage([CHAVE_ORIGENS, CHAVE_ULTIMA_BUSCA], function (guardado) {
+      const origens = guardado[CHAVE_ORIGENS] || [];
+      if (origens.length === 0) return;
 
-          const origens = guardado[CHAVE_ORIGENS] || [];
-          if (origens.length === 0) return;
+      const ultima = guardado[CHAVE_ULTIMA_BUSCA] || 0;
 
-          const ultima = guardado[CHAVE_ULTIMA_BUSCA] || 0;
+      // Sem trava de frequencia, cada aba do ML dispararia a busca.
+      if (Date.now() - ultima < INTERVALO_BUSCA_MS) return;
 
-          // Sem trava de frequencia, cada aba do ML dispararia a busca.
-          if (Date.now() - ultima < INTERVALO_BUSCA_MS) return;
+      // Marcado ANTES de buscar: varias abas abertas juntas passariam todas
+      // pela trava antes da primeira terminar.
+      if (!MLMetricsGravacao.gravarStorage({ [CHAVE_ULTIMA_BUSCA]: Date.now() })) return;
 
-          // Marcado ANTES de buscar: varias abas abertas juntas passariam
-          // todas pela trava antes da primeira terminar.
-          try {
-            chrome.storage.local.set({ [CHAVE_ULTIMA_BUSCA]: Date.now() }, function () {
-              if (chrome.runtime.lastError) return;
-            });
-          } catch (e) {
-            return;
-          }
+      origens.forEach(function (url) {
+        if (!chrome.runtime.sendMessage) return;
 
-          origens.forEach(function (url) {
-            if (!chrome.runtime.sendMessage) return;
+        try {
+          chrome.runtime.sendMessage({ tipo: "buscar", url: url }, function (resposta) {
+            if (chrome.runtime.lastError) return;
 
-            try {
-              chrome.runtime.sendMessage({ tipo: "buscar", url: url }, function (resposta) {
-                if (chrome.runtime.lastError) return;
+            if (!resposta || !resposta.ok) return;
 
-                if (!resposta || !resposta.ok) return;
+            // DOMParser monta o documento sem exibir nem executar scripts.
+            const doc = new DOMParser().parseFromString(resposta.html, "text/html");
+            if (!doc.body) return;
 
-                // DOMParser monta o documento sem exibir nem executar scripts.
-                const doc = new DOMParser().parseFromString(resposta.html, "text/html");
-                if (!doc.body) return;
-
-                salvar(MLMetricsLeitura.varrerPagina(doc, url), true);
-              });
-            } catch (e) {
-              // contexto invalidado ao enviar a mensagem
-            }
+            salvar(MLMetricsLeitura.varrerPagina(doc, url), true);
           });
+        } catch (e) {
+          // contexto invalidado ao enviar a mensagem
         }
-      );
-    } catch (e) {
-      // contexto invalidado antes do callback
-    }
+      });
+    });
   }
 
   // --------------------------------------------------------------------------
@@ -486,24 +340,18 @@
     const amostras = MLMetricsDiagnostico.coletarAmostras(document);
     if (amostras.length === 0) return;
 
-    try {
-      chrome.storage.local.set({
-        [CHAVE_DIAGNOSTICO]: {
-          // Host e caminho mascarado: diz a tela sem codigo, id nem titulo. A
-          // query nunca entra.
-          host: window.location.hostname,
-          caminho: caminho,
-          quando: agora,
-          amostras: amostras,
-          // Sem o periodo, numero lido nao diz se e total ou recorte (#47).
-          periodo: MLMetricsDiagnostico.coletarTextosDePeriodo(document)
-        }
-      }, function () {
-        if (chrome.runtime.lastError) return;
-      });
-    } catch (e) {
-      // Contexto invalidado: diagnostico nao e essencial.
-    }
+    MLMetricsGravacao.gravarStorage({
+      [CHAVE_DIAGNOSTICO]: {
+        // Host e caminho mascarado: diz a tela sem codigo, id nem titulo. A
+        // query nunca entra.
+        host: window.location.hostname,
+        caminho: caminho,
+        quando: agora,
+        amostras: amostras,
+        // Sem o periodo, numero lido nao diz se e total ou recorte (#47).
+        periodo: MLMetricsDiagnostico.coletarTextosDePeriodo(document)
+      }
+    });
   }
 
   /**
@@ -533,8 +381,10 @@
 
     console.error("[ML METRICS] erro em " + onde + ": " + mensagem);
 
+    // Com o contexto invalidado, o getManifest tambem quebraria: o erro fica
+    // so no console desta aba.
     try {
-      chrome.storage.local.set({
+      MLMetricsGravacao.gravarStorage({
         [CHAVE_ERRO]: {
           onde: onde,
           mensagem: mensagem,
@@ -545,11 +395,9 @@
           // Diz se o erro e desta build ou de uma antiga guardada no storage.
           versao: chrome.runtime.getManifest().version
         }
-      }, function () {
-        if (chrome.runtime.lastError) return;
       });
     } catch (e) {
-      // Contexto invalidado: o erro fica so no console desta aba.
+      // contexto invalidado
     }
   }
 
