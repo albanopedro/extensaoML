@@ -17,7 +17,6 @@
   const CHAVE_DIAGNOSTICO = MLMetricsGravacao.CHAVES.DIAGNOSTICO;
   const CHAVE_ERRO = MLMetricsGravacao.CHAVES.ERRO;
   const CHAVE_ORIGENS = MLMetricsGravacao.CHAVES.ORIGENS;
-  const CHAVE_ULTIMA_BUSCA = MLMetricsGravacao.CHAVES.ULTIMA_BUSCA;
   const CHAVE_TELAS_FALHANDO = MLMetricsGravacao.CHAVES.TELAS_FALHANDO;
 
   // O que ja aconteceu NESTE carregamento da pagina: null, "marcada"
@@ -25,13 +24,6 @@
   // tela falhando e gravado no maximo uma vez, e uma varredura vazia DEPOIS
   // de uma captura (a lista se remontando) nao acusa falha.
   let estadoDaTela = null;
-
-  // Busca automatica (atualizarEmSegundoPlano): DESLIGADA. As telas de
-  // vendedor sao montadas por JavaScript, e o HTML buscado pelo service
-  // worker muito provavelmente chega sem os numeros. Religar so depois que a
-  // tela real mostrar que o HTML traz os numeros.
-  const BUSCA_AUTOMATICA_LIGADA = false;
-  const INTERVALO_BUSCA_MS = 2 * 60 * 60 * 1000;
 
   // Quanto esperar pelo service worker antes de gravar na aba (plano B). Um
   // SW derrubado pelo navegador nunca responde - sem esta trava a leitura
@@ -55,16 +47,14 @@
    * corrida numa situacao rara.
    *
    * @param {Object} novos o que a varredura leu, por codigo de anuncio
-   * @param {boolean} emSegundoPlano true quando veio da busca automatica: o
-   *                        aviso verde apareceria sobre uma pagina sem relacao
    */
-  function salvar(novos, emSegundoPlano) {
+  function salvar(novos) {
     if (Object.keys(novos).length === 0) return;
 
     function depoisDeGravar(mudancas) {
       // So quando algo MUDOU: o aviso mexe no DOM, o observer varreria de
       // novo e avisaria de novo.
-      if (mudancas > 0 && !emSegundoPlano) {
+      if (mudancas > 0) {
         console.log(
           "%c[ML METRICS]%c capturei " + mudancas + " anuncio(s):",
           "background:#3483fa;color:#fff;padding:2px 6px;border-radius:3px",
@@ -79,7 +69,7 @@
     try {
       // Sem API de mensagem (pagina de teste fora da extensao): grava aqui.
       if (typeof chrome.runtime.sendMessage !== "function") {
-        gravarNestaAba(novos, emSegundoPlano, depoisDeGravar);
+        gravarNestaAba(novos, depoisDeGravar);
         return;
       }
 
@@ -89,18 +79,18 @@
       const timerPlanoB = setTimeout(function () {
         if (usado) return;
         usado = true;
-        gravarNestaAba(novos, emSegundoPlano, depoisDeGravar);
+        gravarNestaAba(novos, depoisDeGravar);
       }, TIMEOUT_PLANO_B_MS);
 
       chrome.runtime.sendMessage(
-        { tipo: "salvar", novos: novos, automatica: Boolean(emSegundoPlano) },
+        { tipo: "salvar", novos: novos },
         function (resposta) {
           if (usado) return;
           usado = true;
           clearTimeout(timerPlanoB);
 
           if (chrome.runtime.lastError || !resposta || !resposta.ok) {
-            gravarNestaAba(novos, emSegundoPlano, depoisDeGravar);
+            gravarNestaAba(novos, depoisDeGravar);
             return;
           }
 
@@ -118,11 +108,10 @@
    * storage termina a tarefa em silencio, e a proxima gravacao tenta de novo.
    *
    * @param {Object} novos
-   * @param {boolean} emSegundoPlano
    * @param {Function} pronto recebe quantos anuncios mudaram, depois de gravar
    */
-  function gravarNestaAba(novos, emSegundoPlano, pronto) {
-    MLMetricsGravacao.gravarNaFila(novos, emSegundoPlano).then(function (resposta) {
+  function gravarNestaAba(novos, pronto) {
+    MLMetricsGravacao.gravarNaFila(novos).then(function (resposta) {
       if (resposta.ok) {
         pronto(resposta.mudancas);
       } else if (resposta.motivo) {
@@ -235,20 +224,20 @@
   }
 
   // --------------------------------------------------------------------------
-  // Atualizacao automatica
+  // Origens aprendidas
   // --------------------------------------------------------------------------
 
   /**
    * Guarda os enderecos onde a captura funcionou (no maximo 3, mais recente
-   * primeiro). Nao sabemos de antemao a URL da tela de publicacoes, entao
-   * APRENDEMOS com as telas que entregam numeros.
+   * primeiro). Servem ao aviso de tela que parou (marcarTelaFalhando) e ao
+   * relatorio do popup, que mostra quais telas a extensao reconheceu.
    */
   function lembrarOrigem(url) {
     // Sem a query: filtros, paginacao e eventuais identificadores de sessao.
     const limpa = url.split("?")[0];
 
-    // Tela de UM anuncio (codigo no caminho) nao presta para revisitar e
-    // expulsaria a tela de publicacoes das 3 vagas.
+    // Tela de UM anuncio (codigo no caminho) fica de fora: sao muitas, e
+    // expulsariam a tela de publicacoes das 3 vagas.
     if (limpa.match(MLMetricsLeitura.PADRAO_CODIGO)) return;
 
     MLMetricsGravacao.alterarStorage([CHAVE_ORIGENS], function (guardado) {
@@ -261,51 +250,6 @@
         .slice(0, 3);
 
       return { [CHAVE_ORIGENS]: atualizadas };
-    });
-  }
-
-  /**
-   * Busca sozinha as telas de vendedor aprendidas e atualiza os numeros
-   * (hoje desligada - ver BUSCA_AUTOMATICA_LIGADA).
-   *
-   * O fetch fica no service worker: la a origem e a da extensao e o CORS nao
-   * se aplica. O HTML volta como texto e e varrido aqui. Se a tela for
-   * montada por JavaScript, o HTML vem sem numeros e nada e gravado - a
-   * captura normal segue cobrindo.
-   */
-  function atualizarEmSegundoPlano() {
-    MLMetricsGravacao.lerStorage([CHAVE_ORIGENS, CHAVE_ULTIMA_BUSCA], function (guardado) {
-      const origens = guardado[CHAVE_ORIGENS] || [];
-      if (origens.length === 0) return;
-
-      const ultima = guardado[CHAVE_ULTIMA_BUSCA] || 0;
-
-      // Sem trava de frequencia, cada aba do ML dispararia a busca.
-      if (Date.now() - ultima < INTERVALO_BUSCA_MS) return;
-
-      // Marcado ANTES de buscar: varias abas abertas juntas passariam todas
-      // pela trava antes da primeira terminar.
-      if (!MLMetricsGravacao.gravarStorage({ [CHAVE_ULTIMA_BUSCA]: Date.now() })) return;
-
-      origens.forEach(function (url) {
-        if (!chrome.runtime.sendMessage) return;
-
-        try {
-          chrome.runtime.sendMessage({ tipo: "buscar", url: url }, function (resposta) {
-            if (chrome.runtime.lastError) return;
-
-            if (!resposta || !resposta.ok) return;
-
-            // DOMParser monta o documento sem exibir nem executar scripts.
-            const doc = new DOMParser().parseFromString(resposta.html, "text/html");
-            if (!doc.body) return;
-
-            salvar(MLMetricsLeitura.varrerPagina(doc, url), true);
-          });
-        } catch (e) {
-          // contexto invalidado ao enviar a mensagem
-        }
-      });
     });
   }
 
@@ -440,10 +384,6 @@
   if (document.body) {
     // Pagina que ja veio pronta do servidor: os numeros ja estao la.
     coletar();
-
-    if (BUSCA_AUTOMATICA_LIGADA && window.location.hostname.indexOf("mercadolivre") !== -1) {
-      atualizarEmSegundoPlano();
-    }
 
     // Telas de vendedor montam a lista por JavaScript depois do carregamento:
     // em vez de apostar num tempo fixo, reagimos quando o DOM muda.

@@ -149,7 +149,7 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
 | `mlmetrics_conferencia` | `{ MLB123: { resultado: "bate"\|"nao", quando } }` — o que a vendedora marcou na conferência (lote 27). Gravado porque o popup fecha a cada clique fora dele |
 | `mlmetrics_telas_falhando` | `{ "<tela mascarada>": { quando, versao } }` — telas que **já entregaram** números e pararam (lote 27). Vira o aviso laranja do popup |
 | `mlmetrics_historico_<código>` | uma chave **por anúncio** (lote 26): `{ "AAAA-MM-DD": { visitas, vendas, origem: {…} } }` — um registro por dia no formato do cache, com o rastro de cada número; 400 dias. Ainda não é exibido. O manifest pede `unlimitedStorage` para o histórico nunca tirar espaço do cache. |
-| `mlmetrics_ultima_busca` | timestamp da última busca automática (trava de 2 h). Com a busca desligada, a chave não é mais criada. |
+| `mlmetrics_ultima_busca` | **Removida no lote 38**, junto com a busca automática. Pode sobrar no navegador de quem usou versão antiga; o "Limpar dados guardados" apaga (pelo prefixo). |
 
 ### Fluxo
 
@@ -205,13 +205,11 @@ Os nomes são definidos **uma vez só**, em `gravacao.js` (`CHAVES`, congelado c
    painel, sem conversão nem "vende a cada" (#40). O fechamento vale para aquele anúncio até o F5. Reage a
    troca de URL (poller de 1 s, que para quando o script fica órfão) e a
    `chrome.storage.onChanged` — só quando o registro do anúncio da tela mudou.
-3. **Busca automática: DESLIGADA** (`BUSCA_AUTOMATICA_LIGADA = false` no coletor).
-   Quando ligada, a cada 2 h o coletor pede ao **service worker** o HTML das origens
-   aprendidas; o SW confere quem pediu e o endereço (só https no domínio do ML, também
-   depois de redirecionamento), faz o `fetch` com a sessão e tempo limite de 20 s, e o
-   content script parseia com `DOMParser` + `varrerPagina` e grava em silêncio.
-   Desligada porque a tela de vendedor é montada por JavaScript, e o HTML buscado muito
-   provavelmente não traz os números.
+3. **Busca automática: REMOVIDA** (lote 38; estava desligada desde o lote 22). A extensão
+   só lê o que a vendedora abre na tela e nunca busca página nenhuma com a sessão dela.
+   O service worker atende só "salvar". Se um dia for preciso trazer de volta, o código
+   está no git até o lote 37 (`atualizarEmSegundoPlano` no coletor, `buscar` e
+   `enderecoPermitido` no `background.js`).
 4. **Popup** (com a versão ao lado do nome):
    - **Aviso vermelho no topo** quando existe `mlmetrics_erro`: diz que a extensão
      falhou ao ler uma tela, quando foi, e manda copiar o diagnóstico (lote 24).
@@ -399,7 +397,7 @@ de vendedor (nunca vista — ver "Maior risco aberto" na seção 4):
 |---|---|---|---|---|---|
 | #47 | MÉDIO | Período (7/30 dias) não é registrado junto do rastro (observer resolvido no lote 21; o período já vem no diagnóstico desde o lote 23a) | ⚠️ parcial | Sim (período) | 23b |
 | — | — | **Exibir vendas/mês e faturamento/mês** a partir do histórico diário (a gravação já existe desde o lote 26) | ⬜ | Sim — conferência dos 3 anúncios **e** #47 | 34 |
-| — | — | Decisão: religar a busca automática? | ⬜ | Sim (o HTML buscado traz os números?) | — |
+| — | — | Decisão: religar a busca automática? | ✅ decidida | Pedro decidiu **remover** o código (lote 38). | 38 |
 
 Nenhuma das três tem como avançar sem o `telaAtual.periodo`/`telaAtual` de uma tela de
 vendedor real (via "Copiar diagnóstico" da cliente, ou de uma conta com anúncio, se
@@ -666,6 +664,20 @@ e conferir 11 itens na mão.
 | Custo da leitura | A verificação no Edge passou a medir, **dentro do mundo isolado da extensão** (`rodarNaExtensao`), quanto custa ler uma página real salva em `teste/` — as que têm dado da cliente e ficam fora do repositório. Em 888 KB: **3 ms** no portão (`paginaMencionaVisita`, que roda a cada lote de mutações em qualquer página do ML) e **7 ms** na varredura completa (com um rótulo plantado, já que a página salva é vitrine). Limites de 100 ms e 500 ms, para pegar regressão grande sem falhar em máquina ocupada. Sem página salva, o caso é **pulado**, não falha. → **23/23**. |
 | Mensagem pronta | `MENSAGEM-CLIENTE.md`: o texto para mandar junto com o zip (instalar em 4 passos, e depois diagnóstico + conferência dos 3 anúncios), mais a lista do que precisa voltar. Tira o atrito do passo que está travando o projeto. |
 
+### Lote 38 — busca automática removida (28/09/2026)
+
+Pedido do Pedro. A busca estava desligada desde o lote 22 (`BUSCA_AUTOMATICA_LIGADA = false`), e o
+código continuava lá. O JS de `src/` foi de 3.847 para **3.697 linhas**.
+
+| Item | O que foi feito |
+|---|---|
+| Coletor | Saíram `atualizarEmSegundoPlano`, `BUSCA_AUTOMATICA_LIGADA`, `INTERVALO_BUSCA_MS` e o parâmetro `emSegundoPlano` do `salvar`/`gravarNestaAba`. `lembrarOrigem` fica: as origens alimentam o aviso de tela que parou e o relatório. |
+| Service worker | Saíram o pedido `"buscar"`, `buscar()`, `enderecoPermitido` e `TEMPO_LIMITE_MS`. O SW só atende "salvar" e cuida do ícone. A extensão **nunca** faz `fetch` com a sessão da vendedora. |
+| Gravação | Saíram `CHAVES.ULTIMA_BUSCA` e o parâmetro `automatica` de `mesclarOrigem`, `mesclar`, `registrarDia`, `gravarLeitura`, `gravarHistorico` e `gravarNaFila`. O rastro novo não leva mais `automatica: false`; registros antigos que tenham o campo continuam válidos. |
+| Painel e popup | Saíram os rótulos "(busca automática)" e "(automática)". |
+| O que sobra na cliente | A chave `mlmetrics_ultima_busca` pode existir em quem usou versão antiga: não é lida por ninguém e o "Limpar" apaga pelo prefixo. |
+| Testes | Harness **315/315**. Saíram os dois casos de busca recusada e o da marca automática. Entraram "o rastro não leva a marca" e "o SW não responde a pedido de busca". Os 14 `false` que sobravam nas chamadas foram tirados. Navegador **71/71**, Edge **30/30**. Versão continua 0.2.7. |
+
 ### Lote 37 — um percurso só da página (28/09/2026)
 
 Pedido do Pedro. O JS de `src/` foi de 3.868 para **3.847 linhas**.
@@ -701,7 +713,7 @@ da nova e comparou só o código. As únicas diferenças são as da linha "Dupli
 | Comentários | Saiu a **história** ("antes era X", "no lote N mudou"), que já mora neste arquivo e no git. Ficou o **porquê atual** de cada regra. Tudo sem acento, como antes. |
 | Duplicações | `extensaoViva()` era idêntica no `coletor.js` e no `content.js` e agora mora só no `gravacao.js` (o único arquivo carregado nos dois lados). `ehDaExtensao()` + `SELETOR_DA_EXTENSAO` no `leitura.js` trocam 7 cópias de `closest("#mlmetrics-painel, #mlmetrics-aviso")`. O `calculo.js` usa o `PADRAO_CODIGO` do `leitura.js`, em vez de uma cópia. O `content.js` chama `removerPainel()` onde o repetia. |
 | Testes | O harness passa `MLMetricsLeitura` para o `calculo.js` e ganhou sozinho o caso de ordem do manifest → **307/307**. Navegador **71/71**, Edge **30/30** (com `--extensao=` apontando para a pasta). `manifest.json` continua **0.2.7**. |
-| Próximos | Plano B e helper de storage feitos no lote 36; TreeWalker único no lote 37. Falta só remover a busca automática desligada (decisão do Pedro). |
+| Próximos | Plano B e helper de storage no lote 36, TreeWalker único no lote 37 e busca automática removida no lote 38. Enxugamento concluído. |
 
 ### Lote 33 — venda arredondada vira piso, não silêncio (25/09/2026)
 
@@ -864,7 +876,7 @@ tela real disser o que o número significa (#47), o histórico já estará lá, 
 | 1 | **Enviar a 0.2.7 + decisão do repositório** | #50 | ⬜ | Seção 4. O commit e a verificação dos 11 itens já estão resolvidos (lote 28). |
 | 2 | **★ Ação — capturar "Minhas publicações" real + conferência de 3 anúncios** | — | ⬜ | "Copiar diagnóstico" na tela (`telaAtual`, com `resumoDasRecusas`) e passo 7 do guia. Decide #47 e valida #38, #48 e #57. |
 | 3 | **23b — Período no rastro** | #47 | ⬜ | Com o `telaAtual.periodo` da tela real, registrar o recorte (7/30 dias) junto do rastro. |
-| 4 | **Decisão — religar a busca automática?** | — | ⬜ | Só se a tela real mostrar que o HTML buscado traz os números. |
+| 4 | ~~Decisão — religar a busca automática?~~ | — | ✅ | Removida no lote 38. |
 | — | **Contínuo** | #53 | ⬜ | Cada lote entra com casos no harness. |
 
 ---
@@ -876,7 +888,6 @@ Exemplos do que dizer numa nova conversa, depois de colar este arquivo:
 - `"chegou o diagnóstico da tela real, vamos no lote 23b"`
 - `"resolve o #47"`
 - `"me mostra o que o diagnóstico da cliente diz antes de mexer"`
-- `"vale religar a busca automática?"`
 
 O que eu espero de você em cada rodada:
 
@@ -943,6 +954,7 @@ paramos.
 | 33 — Venda arredondada como piso | ✅ feito | 25/09/2026 | Anúncio com "Novo \| +25 vendidos" ficava sem painel. `vendidosDaPagina` passou a usar o subtítulo (condição + vendidos) como âncora — o que separa o número do anúncio dos "+N" das vitrines — e o painel mostra "+25" e "a partir de R$ …". "+10mil" continua fora. Harness **306/306**, navegador **71/71**, Edge **30/30**. `manifest.json` → **0.2.7**. |
 | 35 — Enxugar comentários | ✅ feito | 28/09/2026 | Pedido do Pedro. Comentários só com o porquê atual. `extensaoViva`, `ehDaExtensao` e `PADRAO_CODIGO` num lugar só. JS de 4.737 → 3.941 linhas, código comparado sem comentários: só as mudanças pretendidas. Harness **307/307**, navegador **71/71**, Edge **30/30**. Versão continua 0.2.7. |
 | 36 — Plano B = SW + storage | ✅ feito | 28/09/2026 | Pedido do Pedro. A gravação completa (`gravarNaFila`) e os helpers `lerStorage`/`gravarStorage`/`alterarStorage` ficam no `gravacao.js`, e SW, aba e popup usam os mesmos. Fecha a fila do plano B que travava com leitura malformada. JS de 3.941 → 3.868 linhas. Harness **314/314**, navegador **71/71**, Edge **30/30**. |
+| 38 — Busca automática removida | ✅ feito | 28/09/2026 | Pedido do Pedro. Sai todo o código da busca (coletor, SW, chave `ULTIMA_BUSCA` e o parâmetro `automatica`). O SW só grava e cuida do ícone. JS de 3.847 → 3.697 linhas. Harness **315/315**, navegador **71/71**, Edge **30/30**. |
 | 37 — Percurso único | ✅ feito | 28/09/2026 | Pedido do Pedro. `paraCadaTexto` no `leitura.js` substitui os 5 TreeWalkers e carrega as guardas (filtro técnico + nada da extensão). JS de 3.868 → 3.847 linhas. Harness **316/316**, navegador **71/71**, Edge **30/30**. |
 | 34 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
 | ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.7: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |

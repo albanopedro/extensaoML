@@ -93,8 +93,7 @@
       rastro.className = "origem";
       rastro.textContent = metrica + ": " + origem[metrica].trecho +
         " · " + (origem[metrica].tela || "?") +
-        " · " + formatarData(origem[metrica].em) +
-        (origem[metrica].automatica ? " (automática)" : "");
+        " · " + formatarData(origem[metrica].em);
       item.appendChild(rastro);
     });
 

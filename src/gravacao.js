@@ -44,7 +44,6 @@ var MLMetricsGravacao = (function () {
     DIAGNOSTICO: "mlmetrics_diagnostico",
     ERRO: "mlmetrics_erro",
     ORIGENS: "mlmetrics_origens",
-    ULTIMA_BUSCA: "mlmetrics_ultima_busca",
     // "bate" / "nao bate" por anuncio. No storage porque o popup fecha a cada
     // clique fora dele.
     CONFERENCIA: "mlmetrics_conferencia",
@@ -98,23 +97,19 @@ var MLMetricsGravacao = (function () {
 
   /**
    * Junta o rastro de origem guardado com o desta leitura, metrica a metrica,
-   * carimbando a hora e se a leitura veio da busca automatica. A origem das
-   * vendas lidas em outra tela nao pode sumir porque esta tela trouxe visitas.
+   * carimbando a hora. A origem das vendas lidas em outra tela nao pode sumir
+   * porque esta tela trouxe visitas.
    *
    * @param {Object|undefined} guardada origem que ja estava no cache
    * @param {Object|undefined} nova origem desta varredura (varrerPagina)
    * @param {number} agora
-   * @param {boolean} automatica true quando veio da busca em segundo plano
    * @returns {Object}
    */
-  function mesclarOrigem(guardada, nova, agora, automatica) {
+  function mesclarOrigem(guardada, nova, agora) {
     const resultado = Object.assign({}, guardada);
 
     Object.keys(nova || {}).forEach(function (metrica) {
-      resultado[metrica] = Object.assign({}, nova[metrica], {
-        em: agora,
-        automatica: Boolean(automatica)
-      });
+      resultado[metrica] = Object.assign({}, nova[metrica], { em: agora });
     });
 
     return resultado;
@@ -128,11 +123,10 @@ var MLMetricsGravacao = (function () {
    * @param {Object} cache o cache guardado (mlmetrics_dados)
    * @param {Object} novos o que a varredura leu, por codigo de anuncio
    * @param {number} agora
-   * @param {boolean} automatica true quando veio da busca em segundo plano
    * @returns {Object} mudancas (codigos com numero novo) e renovados (codigos
    *                   em que so a data e o rastro andaram)
    */
-  function mesclar(cache, novos, agora, automatica) {
+  function mesclar(cache, novos, agora) {
     // Separar o que MUDOU e obrigatorio: o aviso verde mexe no DOM, o
     // observer varre de novo, e sem esta trava avisaria de novo - em laco.
     const mudancas = Object.keys(novos).filter(function (codigo) {
@@ -162,15 +156,13 @@ var MLMetricsGravacao = (function () {
 
       cache[codigo] = Object.assign({}, anterior, novos[codigo], {
         capturadoEm: agora,
-        origem: mesclarOrigem(anterior.origem, novos[codigo].origem, agora, automatica)
+        origem: mesclarOrigem(anterior.origem, novos[codigo].origem, agora)
       });
     });
 
     renovados.forEach(function (codigo) {
       cache[codigo].capturadoEm = agora;
-      cache[codigo].origem = mesclarOrigem(
-        cache[codigo].origem, novos[codigo].origem, agora, automatica
-      );
+      cache[codigo].origem = mesclarOrigem(cache[codigo].origem, novos[codigo].origem, agora);
     });
 
     return { mudancas: mudancas, renovados: renovados };
@@ -238,10 +230,9 @@ var MLMetricsGravacao = (function () {
    * @param {Object} historico { "AAAA-MM-DD": registro } de um anuncio
    * @param {Object} novo o que a varredura leu para esse anuncio
    * @param {number} agora
-   * @param {boolean} automatica true quando veio da busca em segundo plano
    * @returns {boolean} true quando o historico precisa ser gravado
    */
-  function registrarDia(historico, novo, agora, automatica) {
+  function registrarDia(historico, novo, agora) {
     const hoje = diaDe(agora);
     const origemNova = novo.origem || {};
     let alterou = false;
@@ -258,7 +249,7 @@ var MLMetricsGravacao = (function () {
       soEsta[metrica] = origemNova[metrica];
 
       registro[metrica] = novo[metrica];
-      registro.origem = mesclarOrigem(registro.origem, soEsta, agora, automatica);
+      registro.origem = mesclarOrigem(registro.origem, soEsta, agora);
       historico[hoje] = registro;
       alterou = true;
     });
@@ -369,11 +360,10 @@ var MLMetricsGravacao = (function () {
    * cache ja esta gravado: o historico nunca e o motivo de perder uma leitura.
    *
    * @param {Object} novos o que a varredura leu, por codigo de anuncio
-   * @param {boolean} automatica true quando veio da busca em segundo plano
    * @returns {Promise<Object>} { ok, mudancas } ou { ok: false, motivo? } -
    *                            nunca rejeita
    */
-  function gravarLeitura(novos, automatica) {
+  function gravarLeitura(novos) {
     return new Promise(function (resolve) {
       try {
         chrome.storage.local.get([CHAVES.CACHE], function (guardado) {
@@ -387,7 +377,7 @@ var MLMetricsGravacao = (function () {
           let resultado;
 
           try {
-            resultado = mesclar(cache, novos, agora, automatica);
+            resultado = mesclar(cache, novos, agora);
           } catch (e) {
             resolve({ ok: false });  // leitura malformada: nao grava nada
             return;
@@ -408,7 +398,7 @@ var MLMetricsGravacao = (function () {
             }
 
             const resposta = { ok: true, mudancas: resultado.mudancas.length };
-            gravarHistorico(novos, agora, automatica, function () {
+            gravarHistorico(novos, agora, function () {
               resolve(resposta);
             });
           });
@@ -429,10 +419,9 @@ var MLMetricsGravacao = (function () {
    *
    * @param {Object} novos
    * @param {number} agora
-   * @param {boolean} automatica
    * @param {Function} pronto chamada sempre - a fila depende dela para andar
    */
-  function gravarHistorico(novos, agora, automatica, pronto) {
+  function gravarHistorico(novos, agora, pronto) {
     const codigos = Object.keys(novos);
     const chaves = codigos.map(chaveDoHistorico);
 
@@ -450,7 +439,7 @@ var MLMetricsGravacao = (function () {
             const chave = chaveDoHistorico(codigo);
             const historico = guardado[chave] || {};
 
-            if (registrarDia(historico, novos[codigo], agora, automatica)) {
+            if (registrarDia(historico, novos[codigo], agora)) {
               alterados[chave] = historico;
             }
           });
@@ -487,12 +476,11 @@ var MLMetricsGravacao = (function () {
    * Poe uma gravacao (gravarLeitura) na fila deste contexto.
    *
    * @param {Object} novos
-   * @param {boolean} automatica
    * @returns {Promise<Object>} a resposta de gravarLeitura - nunca rejeita
    */
-  function gravarNaFila(novos, automatica) {
+  function gravarNaFila(novos) {
     const tarefa = filaDeGravacao.then(function () {
-      return gravarLeitura(novos, automatica);
+      return gravarLeitura(novos);
     });
 
     // A fila segue mesmo que algo de errado aconteca nesta tarefa.

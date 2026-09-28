@@ -810,7 +810,7 @@ testar("#37 no DOM: rastro das vendas", "Visitas 359 «Vendas 12»", rRotuloValo
 testar("mudou ignora o rastro (mesmo numero)", false,
   mudou({ visitas: 359, origem: { visitas: { em: 1 } } }, { visitas: 359, origem: { visitas: { em: 2 } } }));
 testar("mudou ve numero diferente", true, mudou({ visitas: 359 }, { visitas: 360 }));
-const mesclada = mesclarOrigem({ vendas: { trecho: "a" } }, { visitas: { trecho: "b" } }, 123, false);
+const mesclada = mesclarOrigem({ vendas: { trecho: "a" } }, { visitas: { trecho: "b" } }, 123);
 testar("mesclarOrigem guarda a origem da outra metrica", "a", mesclada.vendas.trecho);
 testar("mesclarOrigem carimba a hora", 123, mesclada.visitas.em);
 testar("faltaOrigem: registro antigo sem rastro", true, faltaOrigem({ visitas: 359 }, { visitas: 359 }));
@@ -1269,26 +1269,26 @@ const T0 = 1000000;
 const origemDe = function (trecho) { return { trecho: trecho, tela: "/anuncios/lista" }; };
 const cacheG = {};
 
-const g1 = MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 359, origem: { visitas: origemDe("a") } } }, T0, false);
+const g1 = MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 359, origem: { visitas: origemDe("a") } } }, T0);
 testar("mesclar: anuncio novo conta como mudanca", "MLB1", g1.mudancas.join(","));
 testar("mesclar: carimba a hora no rastro", T0, cacheG.MLB1.origem.visitas.em);
 
-MLMetricsGravacao.mesclar(cacheG, { MLB1: { vendas: 50, origem: { vendas: origemDe("b") } } }, T0 + 1000, false);
+MLMetricsGravacao.mesclar(cacheG, { MLB1: { vendas: 50, origem: { vendas: origemDe("b") } } }, T0 + 1000);
 testar("mesclar: tela so com vendas mantem as visitas", 359, cacheG.MLB1.visitas);
 testar("mesclar: e mantem o rastro das visitas", "a", cacheG.MLB1.origem.visitas.trecho);
 
-const g3 = MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 359, origem: { visitas: origemDe("c") } } }, T0 + 2000, false);
+const g3 = MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 359, origem: { visitas: origemDe("c") } } }, T0 + 2000);
 testar("mesclar: mesmo numero logo depois nao grava nada", 0, g3.mudancas.length + g3.renovados.length);
 
-const g4 = MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 359, origem: { visitas: origemDe("d") } } }, T0 + 3 * 60 * 1000, false);
+const g4 = MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 359, origem: { visitas: origemDe("d") } } }, T0 + 3 * 60 * 1000);
 testar("mesclar: mesmo numero depois de 2 min renova a data", "MLB1", g4.renovados.join(","));
 testar("mesclar: a renovacao aponta o rastro para a leitura nova", "d", cacheG.MLB1.origem.visitas.trecho);
 
-MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 300, origem: { visitas: origemDe("e") } } }, T0 + 4 * 60 * 1000, false);
+MLMetricsGravacao.mesclar(cacheG, { MLB1: { visitas: 300, origem: { visitas: origemDe("e") } } }, T0 + 4 * 60 * 1000);
 testar("mesclar: numero novo menor vence (vale o mais recente)", 300, cacheG.MLB1.visitas);
 
 const cacheAntigo = { MLB2: { visitas: 10, capturadoEm: T0 } };
-const g6 = MLMetricsGravacao.mesclar(cacheAntigo, { MLB2: { visitas: 10, origem: { visitas: origemDe("f") } } }, T0 + 1000, false);
+const g6 = MLMetricsGravacao.mesclar(cacheAntigo, { MLB2: { visitas: 10, origem: { visitas: origemDe("f") } } }, T0 + 1000);
 testar("mesclar: registro antigo sem rastro renova na hora", "MLB2", g6.renovados.join(","));
 testar("mesclar: e ganha o rastro", "f", cacheAntigo.MLB2.origem.visitas.trecho);
 
@@ -1319,7 +1319,7 @@ testar("historico: 23h50 ainda e o mesmo dia", "2026-09-18", MLMetricsGravacao.d
 
 const hist = {};
 testar("historico: primeira leitura do dia grava", true,
-  MLMetricsGravacao.registrarDia(hist, leituraDe(359, 12, "a"), DIA_18, false));
+  MLMetricsGravacao.registrarDia(hist, leituraDe(359, 12, "a"), DIA_18));
 testar("historico: um registro no dia, com os dois numeros", "359/12",
   hist["2026-09-18"].visitas + "/" + hist["2026-09-18"].vendas);
 testar("historico: cada numero leva o rastro de onde veio", "«359 visitas» a",
@@ -1327,33 +1327,34 @@ testar("historico: cada numero leva o rastro de onde veio", "«359 visitas» a",
 testar("historico: e a hora da leitura", DIA_18, hist["2026-09-18"].origem.visitas.em);
 
 testar("historico: mesmo numero de novo no dia nao muda nada", false,
-  MLMetricsGravacao.registrarDia(hist, leituraDe(359, 12, "b"), DIA_18 + 60 * 60 * 1000, false));
+  MLMetricsGravacao.registrarDia(hist, leituraDe(359, 12, "b"), DIA_18 + 60 * 60 * 1000));
 testar("historico: e o rastro fica o da primeira leitura", "«359 visitas» a",
   hist["2026-09-18"].origem.visitas.trecho);
 
-MLMetricsGravacao.registrarDia(hist, leituraDe(361, undefined, "c"), DIA_18_NOITE, false);
+MLMetricsGravacao.registrarDia(hist, leituraDe(361, undefined, "c"), DIA_18_NOITE);
 testar("historico: numero novo no mesmo dia vence (fechamento do dia)", 361, hist["2026-09-18"].visitas);
 testar("historico: a outra metrica do dia continua", 12, hist["2026-09-18"].vendas);
 
 const semRastro = { visitas: 999 };
 testar("historico: numero sem rastro de origem nao entra", false,
-  MLMetricsGravacao.registrarDia(hist, semRastro, DIA_18_NOITE, false));
+  MLMetricsGravacao.registrarDia(hist, semRastro, DIA_18_NOITE));
 
-MLMetricsGravacao.registrarDia(hist, leituraDe(370, undefined, "d"), DIA_19, false);
+MLMetricsGravacao.registrarDia(hist, leituraDe(370, undefined, "d"), DIA_19);
 testar("historico: dia seguinte ganha registro proprio", "2026-09-18,2026-09-19",
   Object.keys(hist).sort().join(","));
 testar("historico: so entra o que foi lido naquele dia (vendas nao e copiada)", undefined,
   hist["2026-09-19"].vendas);
 
 const histVelho = { "2025-01-01": { visitas: 1, origem: {} } };
-MLMetricsGravacao.registrarDia(histVelho, leituraDe(5, undefined, "e"), DIA_18, false);
+MLMetricsGravacao.registrarDia(histVelho, leituraDe(5, undefined, "e"), DIA_18);
 testar("historico: dia com mais de " + MLMetricsGravacao.DIAS_DE_HISTORICO + " dias sai", "2026-09-18",
   Object.keys(histVelho).join(","));
 
-const histAuto = {};
-MLMetricsGravacao.registrarDia(histAuto, leituraDe(7, undefined, "f"), DIA_18, true);
-testar("historico: marca leitura da busca automatica", true,
-  histAuto["2026-09-18"].origem.visitas.automatica);
+// A busca automatica saiu no lote 38: o rastro nao carrega mais a marca.
+const histSemMarca = {};
+MLMetricsGravacao.registrarDia(histSemMarca, leituraDe(7, undefined, "f"), DIA_18);
+testar("historico: rastro sem a marca da busca automatica (lote 38)", "em,tela,trecho",
+  Object.keys(histSemMarca["2026-09-18"].origem.visitas).sort().join(","));
 
 console.log("");
 console.log("=== numero do icone (lote 31) ===");
@@ -1382,7 +1383,6 @@ testar("chaves: os nomes de sempre", JSON.stringify({
   DIAGNOSTICO: "mlmetrics_diagnostico",
   ERRO: "mlmetrics_erro",
   ORIGENS: "mlmetrics_origens",
-  ULTIMA_BUSCA: "mlmetrics_ultima_busca",
   CONFERENCIA: "mlmetrics_conferencia",
   TELAS_FALHANDO: "mlmetrics_telas_falhando"
 }), JSON.stringify(MLMetricsGravacao.CHAVES));
@@ -1586,11 +1586,13 @@ async function testesDoServiceWorker() {
   testar("storage: sem contexto, ler e gravar devolvem false", "false/false", lido + "/" + gravado);
   testar("storage: sem contexto, a gravacao da fila responde ok false", false, semContexto.ok);
 
-  const buscaFora = await chromeSW.enviar({ tipo: "buscar", url: "https://example.com/" }, daExtensao);
-  testar("SW: busca fora do dominio do ML e recusada", false, buscaFora.ok);
-
-  const buscaHttp = await chromeSW.enviar({ tipo: "buscar", url: "http://www.mercadolivre.com.br/anuncios" }, daExtensao);
-  testar("SW: busca sem https e recusada", false, buscaHttp.ok);
+  // A busca automatica saiu no lote 38: o service worker nao busca mais
+  // pagina nenhuma com a sessao da vendedora. O pedido fica sem resposta.
+  const pedidoDeBusca = await Promise.race([
+    chromeSW.enviar({ tipo: "buscar", url: "https://www.mercadolivre.com.br/anuncios" }, daExtensao),
+    new Promise(function (resolve) { setTimeout(function () { resolve("sem resposta"); }, 50); })
+  ]);
+  testar("SW: pedido de busca nao existe mais", "sem resposta", pedidoDeBusca);
 }
 
 function imprimirResumo() {

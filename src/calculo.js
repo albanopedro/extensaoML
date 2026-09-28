@@ -325,7 +325,7 @@ var MLMetricsCalculo = (function () {
   /**
    * Texto do "de onde veio" de um numero, para o title da linha do painel.
    *
-   * @param {Object|undefined} origem trecho, tela, em e automatica
+   * @param {Object|undefined} origem trecho, tela e em
    * @returns {string|null}
    */
   function explicarOrigem(origem) {
@@ -336,7 +336,6 @@ var MLMetricsCalculo = (function () {
       : "data desconhecida";
 
     return "Lido na tela " + (origem.tela || "?") +
-      (origem.automatica ? " (busca automática)" : "") +
       ", em " + quando + ":\n" + origem.trecho;
   }
 
