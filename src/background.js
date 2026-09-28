@@ -5,40 +5,28 @@
 //
 //   "salvar" - grava o que uma aba leu. O service worker e um so para todas
 //              as abas e grava uma leitura de cada vez, entao duas abas do ML
-//              abertas nao apagam o que a outra acabou de gravar (#21). A
-//              regra da mesclagem mora em gravacao.js.
+//              nao apagam o que a outra acabou de gravar (#21). A regra da
+//              mesclagem mora em gravacao.js.
 //
 //   "buscar" - busca o HTML de uma tela de vendedor com a sessao dela, para a
-//              atualizacao automatica. Hoje a atualizacao esta DESLIGADA no
-//              coletor.js (BUSCA_AUTOMATICA_LIGADA) e ninguem pede isto - o
-//              atendimento fica pronto para quando for religada.
-//
-// Por que o fetch mora aqui? No Manifest V3, fetch de content script e
-// tratado como originado da PAGINA que o hospeda, entao esta sujeito a CORS.
-// Buscar www.mercadolivre.com.br estando numa aba produto.mercadolivre.com.br
-// e bloqueado - e com credentials: "include" o servidor precisaria responder
-// Access-Control-Allow-Credentials, o que o ML nao faz. No service worker a
-// origem da requisicao e a EXTENSAO, e com host_permissions o CORS deixa de
-// valer. So o fetch mora aqui; o parse do HTML continua no content script.
+//              atualizacao automatica - hoje DESLIGADA no coletor.js
+//              (BUSCA_AUTOMATICA_LIGADA). O fetch mora aqui porque, no content
+//              script, ele carrega a origem da pagina e esbarra em CORS; aqui
+//              a origem e a extensao, e com host_permissions o CORS nao vale.
 // ============================================================================
 
-// As regras de gravar e os nomes das chaves do storage (MLMetricsGravacao),
-// os mesmos das abas e do popup.
 importScripts("gravacao.js");
 
 const CHAVE_CACHE = MLMetricsGravacao.CHAVES.CACHE;
 
-// Quanto esperar por uma tela antes de desistir. Sem limite, um servidor que
-// nunca responde prenderia a busca - e o service worker acordado - ate o
-// navegador derrubar a requisicao por conta propria.
+// Quanto esperar por uma tela antes de desistir, para um servidor que nunca
+// responde nao prender o service worker acordado.
 const TEMPO_LIMITE_MS = 20000;
 
 /**
- * Diz se um endereco pode ser buscado com a sessao da vendedora.
- *
- * O fetch daqui sai com os cookies do Mercado Livre. Sem esta trava, qualquer
- * endereco que chegasse na mensagem seria buscado com a sessao dela - um
- * "proxy" autenticado. So aceitamos https e o dominio do ML.
+ * Diz se um endereco pode ser buscado com a sessao da vendedora: so https e
+ * o dominio do ML. Sem esta trava o service worker seria um "proxy"
+ * autenticado para qualquer endereco que chegasse na mensagem.
  *
  * @param {string} url
  * @returns {boolean}
@@ -51,13 +39,11 @@ function enderecoPermitido(url) {
     return endereco.protocol === "https:" &&
       (host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br"));
   } catch (e) {
-    return false;  // nem e um endereco
+    return false;
   }
 }
 
-// Fila unica de gravacao. Cada gravacao so comeca quando a anterior terminou:
-// le, mescla e grava sem que outra aba entre no meio. E isso que fecha a
-// corrida entre abas - antes, cada aba tinha a propria fila.
+// Fila unica de gravacao: le, mescla e grava sem que outra aba entre no meio.
 let filaDeGravacao = Promise.resolve();
 
 /**
@@ -87,7 +73,6 @@ function gravarNaFila(novos, automatica) {
           return;
         }
 
-        // Nada mudou nem precisa renovar: nao grava, e a aba nao avisa.
         if (resultado.mudancas.length === 0 && resultado.renovados.length === 0) {
           resolve({ ok: true, mudancas: 0 });
           return;
@@ -95,16 +80,13 @@ function gravarNaFila(novos, automatica) {
 
         chrome.storage.local.set({ [CHAVE_CACHE]: cache }, function () {
           if (chrome.runtime.lastError) {
-            // Quota estourada ou contexto invalidado: nao da para gravar.
-            // A leitura fica so na memoria da aba e some quando ela fechar.
             resolve({ ok: false, motivo: chrome.runtime.lastError.message });
             return;
           }
 
-          // O historico vem DEPOIS do cache, numa gravacao separada, mas
-          // dentro da mesma tarefa da fila - duas abas nao se atropelam nele
-          // tambem. Se ele falhar, o cache ja esta gravado: o historico e um
-          // extra, nunca o motivo de perder uma leitura.
+          // O historico vem DEPOIS do cache, na mesma tarefa da fila. Se ele
+          // falhar, o cache ja esta gravado: o historico nunca e o motivo de
+          // perder uma leitura.
           const resposta = { ok: true, mudancas: resultado.mudancas.length };
           gravarHistorico(novos, agora, automatica, function () {
             resolve(resposta);
@@ -114,26 +96,24 @@ function gravarNaFila(novos, automatica) {
     });
   });
 
-  // A fila segue mesmo que alguma coisa de errado aconteca nesta tarefa.
+  // A fila segue mesmo que algo de errado aconteca nesta tarefa.
   filaDeGravacao = tarefa.catch(function () {});
 
   return tarefa;
 }
 
 /**
- * Anota a leitura de cada anuncio no historico diario dele (ver registrarDia
- * no gravacao.js). So grava as chaves que mudaram.
+ * Anota a leitura de cada anuncio no historico diario dele (registrarDia no
+ * gravacao.js), gravando so as chaves que mudaram.
  *
- * So e chamada quando o cache mudou ou foi renovado: o mesmo numero relido
- * em menos de 2 minutos nao chega aqui, e ele ja esta no historico do dia.
- * (Perto da meia-noite, o dia novo so ganha registro na leitura seguinte, 2
- * minutos depois - nao compensa uma regra so para isso.)
+ * So e chamada quando o cache mudou ou foi renovado. Perto da meia-noite, o
+ * dia novo so ganha registro na leitura seguinte - nao compensa uma regra so
+ * para isso.
  *
  * @param {Object} novos o que a varredura leu, por codigo de anuncio
  * @param {number} agora
  * @param {boolean} automatica
- * @param {Function} pronto chamada sempre, com ou sem erro - a fila depende
- *                          dela para andar
+ * @param {Function} pronto chamada sempre - a fila depende dela para andar
  */
 function gravarHistorico(novos, agora, automatica, pronto) {
   const codigos = Object.keys(novos);
@@ -157,8 +137,6 @@ function gravarHistorico(novos, agora, automatica, pronto) {
         }
       });
     } catch (e) {
-      // Leitura em formato inesperado: sem historico desta vez, mas a fila
-      // NAO pode travar - pronto() tem que ser chamada de qualquer jeito.
       pronto();
       return;
     }
@@ -194,8 +172,7 @@ function buscar(url, responder) {
     .then(function (resposta) {
       if (!resposta.ok) throw new Error("resposta " + resposta.status);
 
-      // Redirecionamento para fora do ML (ou para http) tambem nao serve:
-      // o texto que chegaria nao e da tela de vendedor.
+      // Redirecionamento para fora do ML (ou para http) nao serve.
       if (!enderecoPermitido(resposta.url)) {
         throw new Error("redirecionado para fora do ML");
       }
@@ -206,9 +183,8 @@ function buscar(url, responder) {
       responder({ ok: true, html: html });
     })
     .catch(function () {
-      // Sessao expirada, rede fora, tempo esgotado, pagina mudou de endereco.
-      // Nada a fazer: os dados guardados continuam valendo, e o painel
-      // mostra a idade deles para quem estiver olhando.
+      // Sessao expirada, rede fora, tempo esgotado: os dados guardados
+      // continuam valendo, e o painel mostra a idade deles.
       responder({ ok: false });
     })
     .finally(function () {
@@ -220,9 +196,8 @@ chrome.runtime.onMessage.addListener(function (mensagem, remetente, responder) {
   if (!mensagem) return false;
 
   // So a propria extensao conversa com o service worker. Sem
-  // "externally_connectable" no manifest outras origens nem alcancam este
-  // listener - conferir o id e a segunda tranca, barata, caso o manifest
-  // mude um dia.
+  // "externally_connectable" outras origens nem chegam aqui - conferir o id
+  // e uma segunda tranca, caso o manifest mude um dia.
   const daExtensao = Boolean(remetente) && remetente.id === chrome.runtime.id;
 
   if (mensagem.tipo === "salvar") {
@@ -233,8 +208,7 @@ chrome.runtime.onMessage.addListener(function (mensagem, remetente, responder) {
 
     gravarNaFila(mensagem.novos, Boolean(mensagem.automatica)).then(responder);
 
-    // Canal assincrono: sem este "true" o Chrome encerra o canal quando o
-    // listener retorna, e a resposta nunca chega a aba.
+    // Canal assincrono: sem este "true" a resposta nunca chega a aba.
     return true;
   }
 
@@ -245,7 +219,7 @@ chrome.runtime.onMessage.addListener(function (mensagem, remetente, responder) {
     }
 
     buscar(mensagem.url, responder);
-    return true;  // canal assincrono, mesmo motivo acima
+    return true;
   }
 
   return false;
@@ -256,15 +230,9 @@ chrome.runtime.onMessage.addListener(function (mensagem, remetente, responder) {
 // ----------------------------------------------------------------------------
 
 /**
- * Mostra no icone quantos anuncios tem numero conferivel.
- *
- * Por que: hoje, para saber se a extensao esta capturando, e preciso abrir o
- * popup. O numero no icone responde isso de relance - e, se ele ficar vazio
- * depois de uma passada por "Minhas publicacoes", isso tambem e resposta.
- * Vale mais para quem nao e tecnica: e o sinal de "estou viva e trabalhando".
- *
- * Vazio quando nao ha nada: um "0" no icone parece defeito. Acima de 99 vira
- * "99+", que e o que cabe no espaco.
+ * Mostra no icone quantos anuncios tem numero conferivel - o sinal de "estou
+ * viva e trabalhando" sem abrir o popup. Vazio quando e zero (um "0" parece
+ * defeito); acima de 99, "99+".
  *
  * @param {Object|undefined} cache mlmetrics_dados
  */
@@ -276,20 +244,17 @@ function atualizarDistintivo(cache) {
     chrome.action.setBadgeText({ text: texto });
     chrome.action.setBadgeBackgroundColor({ color: "#3483fa" });
   } catch (e) {
-    // Navegador sem chrome.action (ou contexto invalidado): o icone fica sem
-    // numero, e nada mais depende disso.
+    // Sem chrome.action: o icone fica sem numero, e nada depende disso.
   }
 }
 
-// Toda gravacao no cache - venha de qual aba vier - atualiza o numero.
 chrome.storage.onChanged.addListener(function (mudancas, area) {
   if (area !== "local" || !mudancas[CHAVE_CACHE]) return;
   atualizarDistintivo(mudancas[CHAVE_CACHE].newValue);
 });
 
-// O service worker do Manifest V3 e desligado quando fica ocioso e acorda a
-// cada evento. Em toda acordada reconferimos o numero: depois de um reinicio
-// do navegador ele volta zerado, e ficaria mentindo "nao capturei nada".
+// O service worker e desligado quando fica ocioso e o numero do icone volta
+// zerado depois de um reinicio do navegador: reconferido a cada acordada.
 try {
   chrome.storage.local.get([CHAVE_CACHE], function (guardado) {
     if (chrome.runtime.lastError) return;

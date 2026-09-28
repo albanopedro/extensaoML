@@ -80,7 +80,9 @@ const MLMetricsLeitura = carregarModulo("leitura.js", "MLMetricsLeitura");
 const MLMetricsDiagnostico = carregarModulo("diagnostico.js", "MLMetricsDiagnostico", {
   MLMetricsLeitura: MLMetricsLeitura
 });
-const MLMetricsCalculo = carregarModulo("calculo.js", "MLMetricsCalculo");
+const MLMetricsCalculo = carregarModulo("calculo.js", "MLMetricsCalculo", {
+  MLMetricsLeitura: MLMetricsLeitura
+});
 const MLMetricsGravacao = carregarModulo("gravacao.js", "MLMetricsGravacao");
 
 const {

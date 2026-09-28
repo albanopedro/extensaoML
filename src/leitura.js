@@ -1,101 +1,77 @@
 // ============================================================================
 // LEITURA - o que e numero, de qual rotulo e de qual anuncio
 //
-// A parte da captura que so LE: recebe um documento e um endereco e devolve
-// os numeros achados, cada um com o rastro de origem. Nao toca em
-// chrome.storage, em mensagens nem em window.location - tudo entra por
-// parametro. Saiu do coletor.js por dois motivos:
+// Recebe um documento e um endereco e devolve os numeros achados, cada um com
+// o rastro de origem. Nao toca em chrome.storage, mensagens nem
+// window.location - tudo entra por parametro, para o teste em Node
+// (teste/test-parsing.js) carregar o arquivo como ele e.
 //
-//   - o coletor.js tinha passado de 2 mil linhas, misturando a leitura com
-//     gravacao, observer, busca automatica e diagnostico;
-//   - o teste em Node (teste/test-parsing.js) carrega este arquivo como ele
-//     e. Com tudo preso dentro do IIFE do coletor, o teste precisava recortar
-//     cada funcao do texto do arquivo por marcadores - e uma mudanca de
-//     formato quebrava o recorte, nao a funcao.
+// ESTRATEGIA: nada de seletor CSS fixo, que quebra no primeiro redesenho do
+// site. Procuramos pelo SIGNIFICADO: achamos a palavra "visitas" no texto e
+// pegamos o numero colado nela.
 //
-// ESTRATEGIA: nao usamos seletores CSS fixos (tipo ".andes-card span").
-// Seletores assim quebram no primeiro redesenho de layout, e nem sabemos
-// como e o HTML dessas telas. Em vez disso procuramos pelo SIGNIFICADO:
-// achamos a palavra "visitas" no texto e pegamos o numero mais proximo.
-// E mais resistente a mudancas do site.
-//
-// Carregado antes do diagnostico.js e do coletor.js (ordem do manifest), que
-// usam tudo por MLMetricsLeitura.
+// Carregado antes do diagnostico.js, do coletor.js e do calculo.js (ordem do
+// manifest), que usam tudo por MLMetricsLeitura.
 // ============================================================================
 
 var MLMetricsLeitura = (function () {
   "use strict";
 
-  // Ate quantos niveis subir no DOM procurando o codigo do anuncio.
-  // 12 e folgado o suficiente para atravessar a arvore de um card de lista
-  // sem sair varrendo a pagina inteira.
+  // Ate quantos niveis subir no DOM procurando o codigo do anuncio: o
+  // bastante para atravessar um card de lista sem varrer a pagina inteira.
   const MAX_NIVEIS = 12;
 
   // Maior texto (em caracteres) que a busca pelo valor le num nivel do DOM.
-  // Um card de lista tem centenas de caracteres; acima disso ja e um pedaco
-  // grande da pagina, onde nao ha numero "colado" no rotulo a descobrir.
+  // Um card tem centenas; acima disso ja e um pedaco grande da pagina.
   const LIMITE_TEXTO_POR_NIVEL = 5000;
 
-  // Metricas que sabemos capturar, e as palavras que as denunciam no texto.
+  // Metricas que sabemos capturar e as palavras que as denunciam no texto.
   //
-  // Sao varias palavras por metrica porque o ML nao e consistente: a mesma
-  // informacao aparece como "vendas", "vendidos" ou "vendas concretizadas"
-  // dependendo da tela. Repare que "vendido" NAO contem "venda" - por isso
-  // precisam ser termos separados, e nao um prefixo curto como "vend"
-  // (que pegaria "Vender um igual" e sujaria o resultado).
-  //
-  // Nao usamos "visualiz" para visitas: toda tela de vendedor tem o botao
-  // "Visualizar anuncio", e o numero colado antes dele (estoque, posicao na
-  // lista) seria lido como visitas. "visita" cobre o rotulo que o ML usa.
+  // "vendido" NAO contem "venda", por isso sao termos separados - um prefixo
+  // curto como "vend" pegaria "Vender um igual". E "visualiz" fica de fora das
+  // visitas: toda tela tem o botao "Visualizar anuncio", e o numero antes dele
+  // (estoque, posicao) seria lido como visitas.
   const ROTULOS = {
     visitas: ["visita"],
     vendas: ["venda", "vendido", "vendida"]
   };
 
-  // Identificadores de anuncio do Mercado Livre.
-  //
-  // A letra opcional depois de "MLB" faz parte do codigo, nao e ruido:
-  // "MLBU1234567890" e "MLB1234567890" sao identificadores diferentes.
-  // Capturamos prefixo e digitos separados e remontamos sem o hifen.
+  // Codigo de anuncio. A letra opcional depois de "MLB" faz parte do codigo:
+  // "MLBU123..." e "MLB123..." sao identificadores diferentes. Prefixo e
+  // digitos sao capturados separados e remontados sem o hifen.
   //
   //   MLB-3456789012   ->  MLB3456789012    anuncio
   //   MLB12345678      ->  MLB12345678      produto de catalogo (/p/)
-  //   MLBU1234567890   ->  MLBU1234567890   estrutura nova (/up/)
+  //   MLBU1234567890   ->  MLBU1234567890   user product (/up/)
   const PADRAO_CODIGO = /(MLB[A-Z]?)-?(\d{6,})/;
+
+  // Os elementos que a propria extensao desenha na pagina. Nenhuma leitura
+  // pode olhar para eles: o painel escreve "Visitas" e "Vendas" ao lado de
+  // numeros, e le-los seria a extensao se confirmando sozinha.
+  const SELETOR_DA_EXTENSAO = "#mlmetrics-painel, #mlmetrics-aviso";
 
   // --------------------------------------------------------------------------
   // Utilitarios de leitura
   // --------------------------------------------------------------------------
 
   /**
-   * Converte um texto de numero brasileiro para inteiro.
+   * Converte um numero brasileiro em inteiro: "1.234" -> 1234.
    *
-   * "1.234" no Brasil significa mil duzentos e trinta e quatro: o ponto e
-   * separador de MILHAR e precisa sumir antes de converter.
+   * O ponto e separador de milhar. Texto com virgula e decimal (preco,
+   * media), nunca contagem - devolve null.
    *
-   * Se o texto contem virgula, e um preco decimal (1.234,56) e nao uma
-   * metrica inteira - retornamos null para rejeitar.
-   *
-   * @param {string} bruto ex: "1.234"
+   * @param {string} bruto
    * @returns {number|null}
    */
   function paraInteiro(bruto) {
-    // Virgula indica centavos/preco decimal - metricas sao sempre inteiras.
     if (bruto.indexOf(",") !== -1) return null;
 
-    // split(".").join("") remove TODOS os pontos, nao so o primeiro.
     const numero = parseInt(bruto.split(".").join(""), 10);
-
-    // parseInt devolve NaN quando nao consegue converter.
     return isNaN(numero) ? null : numero;
   }
 
   /**
-   * Valor de um rotulo no texto: "359 visitas" -> 359, "Visitas: 359" -> 359.
-   *
-   * O nome e historico - a primeira versao so olhava o numero ANTES do
-   * rotulo. Hoje quem decide e lerRotulo, que explica as regras; aqui fica
-   * so o numero, ou null quando nao ha leitura segura.
+   * So o valor de lerRotulo, ou null quando nao ha leitura segura.
    *
    * @param {string} texto
    * @param {string} palavra rotulo procurado, em minusculo
@@ -109,39 +85,31 @@ var MLMetricsLeitura = (function () {
   /**
    * Le o valor de um rotulo olhando a FILA de numeros e rotulos em volta dele.
    *
-   * O ML pode escrever o valor antes ou depois do rotulo, e quando varias
-   * metricas ficam lado a lado o mesmo numero fica ENTRE dois rotulos:
+   * O ML escreve o valor antes ou depois do rotulo, e com varias metricas
+   * lado a lado o mesmo numero fica ENTRE dois rotulos:
    *
-   *   "359 visitas 12 vendas"       -> valor antes do rotulo  (12 e das vendas)
-   *   "Visitas: 359 | Vendas: 12"   -> valor depois do rotulo (359 e das visitas)
+   *   "359 visitas 12 vendas"       -> valor antes do rotulo
+   *   "Visitas: 359 | Vendas: 12"   -> valor depois do rotulo
    *
-   * Olhar so o vizinho imediato erra um dos dois formatos - e erra com numero
-   * plausivel: "359 visitas 12 vendas 5 disponiveis" dava 5 vendas. Por isso
-   * montamos a fila de pecas COLADAS em volta do rotulo (numero, rotulo,
-   * numero, rotulo...; colado = entre uma peca e a outra so espaco e
-   * pontuacao, nunca palavra) e deixamos as PONTAS da fila dizerem o formato:
+   * Olhar so o vizinho imediato erra um dos dois formatos com numero
+   * plausivel ("359 visitas 12 vendas 5 disponiveis" dava 5 vendas). Por isso
+   * montamos a fila de pecas COLADAS em volta do rotulo e deixamos as PONTAS
+   * dizerem o formato:
    *
    *   comeca com numero e termina com rotulo   -> valor antes    (N R N R)
    *   comeca com rotulo e termina com numero   -> valor depois   (R N R N)
    *   comeca e termina com numero              -> ambiguo        (N R N)
    *   comeca e termina com rotulo              -> ambiguo        (R N R)
    *
-   * Ambiguo nao vira leitura: na duvida, nao mostramos. O mesmo vale quando o
-   * numero escolhido nao e contagem - decimal, data, hora, percentual,
-   * periodo, preco, ano, faixa "+1.000" (ver motivoDoNumero).
-   *
-   * Entre varias ocorrencias do rotulo vale a ULTIMA que comeca uma palavra:
-   * telas repetem o rotulo em recortes ("visitas hoje", "visitas totais") e a
-   * ultima costuma ser o total. "revenda" nao conta como "venda".
-   *
-   * A posicao devolvida (inicio e fim) alimenta o rastro de origem (ver
-   * trechoDaLeitura) e o diagnostico das recusas.
+   * Ambiguo nao vira leitura, nem numero que nao e contagem (ver
+   * motivoDoNumero). Entre varias ocorrencias do rotulo vale a ULTIMA: telas
+   * repetem o rotulo em recortes ("visitas hoje", "visitas totais") e a
+   * ultima costuma ser o total.
    *
    * @param {string} texto
    * @param {string} palavra rotulo procurado, em minusculo
-   * @returns {Object|null} valor, inicio e fim quando ha leitura; recusa,
-   *                        inicio e fim quando ha numero mas ele nao pode ser
-   *                        usado; null quando nada esta colado no rotulo
+   * @returns {Object|null} { valor, inicio, fim } quando leu; { recusa, inicio,
+   *                        fim } quando o numero nao serve; null sem numero
    */
   function lerRotulo(texto, palavra) {
     if (!texto) return null;
@@ -174,7 +142,7 @@ var MLMetricsLeitura = (function () {
       ultima++;
     }
 
-    // Rotulo sozinho: nenhum numero colado nele neste texto.
+    // Rotulo sozinho: nenhum numero colado nele.
     if (primeira === ultima) return null;
 
     const comecaComNumero = pecas[primeira].tipo === "numero";
@@ -207,16 +175,14 @@ var MLMetricsLeitura = (function () {
   /**
    * Quebra o texto nas pecas que importam para a leitura: NUMEROS e ROTULOS.
    *
-   * Rotulo e toda palavra que COMECA com um rotulo conhecido: as metricas
-   * (ROTULOS) e as quantidades que costumam aparecer ao lado delas nas telas
-   * de vendedor. Sem conhecer "Estoque" como rotulo, o 12 de
-   * "Estoque: 12 | Vendas" pareceria ser das vendas. Logo depois do rotulo
-   * absorvemos ate dois qualificadores ("Visitas totais", "Vendas do mes"),
-   * para que eles nao partam a fila.
+   * Rotulo e toda palavra que COMECA com uma metrica ou com uma quantidade
+   * que aparece ao lado delas: sem "Estoque" como rotulo, o 12 de
+   * "Estoque: 12 | Vendas" pareceria das vendas. Ate dois qualificadores
+   * depois do rotulo ("Visitas totais", "Vendas do mes") sao absorvidos para
+   * nao partir a fila.
    *
-   * Numero leva junto o motivo de nao ser contagem, quando houver. Mesmo sem
-   * servir, continua sendo peca: um preco colado no rotulo ocupa o lugar do
-   * valor, e o rotulo fica sem leitura - em vez de pular o preco e pegar um
+   * Numero que nao e contagem continua sendo peca, com o motivo: um preco
+   * colado no rotulo ocupa o lugar do valor, em vez de ser pulado para um
    * numero mais longe.
    *
    * @param {string} texto
@@ -309,7 +275,7 @@ var MLMetricsLeitura = (function () {
    *   "desde 2024"                     -> ano
    *
    * So olha uma janela curta em volta do numero: o texto de um nivel do DOM
-   * pode ser grande, e copiar o texto inteiro para cada numero seria caro.
+   * pode ser grande.
    *
    * @param {string} texto o texto inteiro
    * @param {number} inicio posicao do numero
@@ -323,12 +289,10 @@ var MLMetricsLeitura = (function () {
 
     if (/[\/:]/.test(bruto) || ehData(bruto)) return "data ou hora";
 
-    // FORMA de data com ponto, valida ou nao. "31.04.2023" nao existe no
-    // calendario, entao o ehData diz "nao e data" - mas tambem nao e
-    // contagem: sem esta linha o numero virava 31.042.023 visitas. A barra e
-    // os dois-pontos ja caem no teste acima; aqui sobra o ponto. Milhar de
-    // verdade nao casa, porque o grupo do meio tem tres digitos
-    // ("1.299.500").
+    // FORMA de data com ponto, valida ou nao: "31.04.2023" nao existe no
+    // calendario (ehData diz que nao e data), mas tambem nao e contagem - sem
+    // esta linha virava 31.042.023 visitas. Milhar de verdade nao casa: o
+    // grupo do meio dele tem tres digitos ("1.299.500").
     if (/^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(bruto)) return "data ou hora";
     if (bruto.indexOf(",") !== -1) return "decimal (preco ou media)";
     if (seguidoDeUnidade(depois)) return "seguido de unidade (%, periodo, mil)";
@@ -336,15 +300,15 @@ var MLMetricsLeitura = (function () {
     // "R$ 49 vendas": preco inteiro colado no rotulo.
     if (/R\$\s*$/i.test(antes)) return "preco";
 
-    // "+1.000 vendidos": faixa arredondada que o ML mostra em pagina publica e
-    // na reputacao do vendedor. Nunca e a contagem exata.
+    // "+1.000 vendidos": faixa arredondada da pagina publica e da reputacao
+    // do vendedor. Nunca e a contagem exata.
     if (/\+\s*$/.test(antes)) return "faixa arredondada (+N)";
 
     const valor = paraInteiro(bruto);
     if (valor === null) return "nao e numero inteiro";
 
     // "Ativo desde 2024": ano, nao quantidade. So com o "desde" - "2024
-    // vendas" sozinho pode ser contagem real de um anuncio popular.
+    // vendas" sozinho pode ser contagem real.
     if (valor >= 1900 && valor <= 2099 && /desde\s+$/i.test(antes)) {
       return "ano (desde ...)";
     }
@@ -355,10 +319,8 @@ var MLMetricsLeitura = (function () {
   /**
    * Diz se ha alguma letra no texto.
    *
-   * Um intervalo unico entre as letras A e U de 8 bits (0xC0-0xFA) seria torto: inclui "×" (U+00D7)
-   * e "÷" (U+00F7), que nao sao letras, e exclui "ü", "ý" e "ÿ". Por isso
-   * usamos tres intervalos que pulam os simbolos e pegam os acentos do
-   * portugues mais os diacriticos comuns:
+   * Tres intervalos, e nao um so de 0xC0 a 0xFF: assim ficam de fora "×"
+   * (U+00D7) e "÷" (U+00F7), que nao sao letras.
    *   A-Z  a-z  À-Ö  Ø-ö  ø-ÿ
    */
   function temLetra(texto) {
@@ -367,12 +329,11 @@ var MLMetricsLeitura = (function () {
 
   /**
    * Diz se um texto comeca com uma data brasileira valida (DD/MM/AAAA ou
-   * DD.MM.AAAA, dia 01-31 e mes 01-12).
+   * DD.MM.AAAA, dia e mes possiveis no calendario).
    *
-   * Existe para que um trecho como "Publicado em 01.02.2023 visitas" nao
-   * entregue o ano como metrica. Checar MES e DIA e essencial, senao um
-   * milhar grande com dois pontos ("1.299.500 visitas") seria rejeitado
-   * como se fosse data.
+   * Checar dia e mes e o que separa data de milhar grande com dois pontos
+   * ("1.299.500 visitas"). Bissexto nao e validado: basta distinguir data de
+   * metrica.
    *
    * @param {string} texto
    * @returns {boolean}
@@ -387,9 +348,6 @@ var MLMetricsLeitura = (function () {
     if (mes < 1 || mes > 12) return false;
     if (dia < 1) return false;
 
-    // Meses com no maximo 30 dias: abril, junho, setembro, novembro.
-    // Fevereiro aceita 29 (ano bisexto existe) - nao vamos validar bisexto
-    // porque so precisamos distinguir data de metrica, nao validar calendario.
     const DIAS_MAXIMOS = [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     if (dia > DIAS_MAXIMOS[mes]) return false;
 
@@ -398,37 +356,33 @@ var MLMetricsLeitura = (function () {
 
   /**
    * Diz se o texto logo depois de um numero o transforma em outra coisa que
-   * nao uma contagem: percentual, data sem ano, hora, periodo ou milhar
-   * abreviado.
+   * nao contagem:
    *
-   *   "12%"       -> percentual (variacao, taxa)
-   *   "14/09"     -> data sem ano        "14:32" -> hora
-   *   "30 dias"   -> periodo do recorte
-   *   "12 mil"    -> abreviacao: o valor real e 12.000, nao 12
+   *   "12%"       -> percentual          "14/09", "14:32" -> data, hora
+   *   "30 dias"   -> periodo do recorte  "12 mil"         -> vale 12.000
    *
-   * A lista e FECHADA de proposito. Rejeitar qualquer palavra depois do
+   * A lista e FECHADA de proposito: rejeitar qualquer palavra depois do
    * numero quebraria "Visitas 359 Vendas 12", em que o que vem depois e so o
-   * proximo rotulo. So bloqueamos o que sabemos que muda o sentido.
+   * proximo rotulo.
    *
    * @param {string} resto texto que vem imediatamente depois do numero
    * @returns {boolean}
    */
   function seguidoDeUnidade(resto) {
-    // Percentual, ou barra/dois-pontos colados em outro digito (data e hora).
     if (/^\s*%/.test(resto) || /^[\/:]\d/.test(resto)) return true;
 
-    // Palavra de tempo, mes abreviado ou milhar. O (?!...) do fim exige que a
-    // palavra termine ali: "d" nao casa com "de", "h" com "hoje", "min" com
-    // "minhas" - so a unidade sozinha conta.
+    // O (?!...) exige que a unidade termine ali: "d" nao casa com "de", "h"
+    // com "hoje", "min" com "minhas".
     return /^\s*(dias?|d|h|horas?|min|minutos?|semanas?|m[eê]s|meses|anos?|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez|mil|mi|k)(?![a-zA-ZÀ-ÖØ-öø-ÿ])/i.test(resto);
   }
 
   /**
-   * Procura o codigo do anuncio (MLB...) a partir de um elemento.
+   * Descobre de qual anuncio e um rotulo, e ate onde buscar o valor dele.
    *
-   * Numa lista de publicacoes cada card tem um link para o anuncio, entao
-   * subimos pelos ancestrais e, em cada nivel, procuramos um link com MLB
-   * no endereco. Paramos no primeiro que achar.
+   * Se a URL ja traz o codigo (tela de UM anuncio), a pagina inteira e dele.
+   * Senao subimos pelos ancestrais ate achar um bloco com links de UM
+   * anuncio so - esse bloco vira o LIMITE da busca pelo valor, para um
+   * anuncio nunca herdar o numero do vizinho.
    *
    * @param {Element} elemento ponto de partida
    * @param {Document} doc
@@ -438,15 +392,9 @@ var MLMetricsLeitura = (function () {
    * @returns {Object|null} codigo e limite - ou null
    */
   function contextoDoAnuncio(elemento, doc, url, saida) {
-    // Caso mais facil: a propria URL da pagina ja identifica o anuncio.
-    // Vale quando estamos na tela de metricas de UM anuncio especifico -
-    // ali a pagina inteira fala de um produto so, entao o limite e o body.
-    //
-    // So olhamos o PATH da URL, nunca a query string. Telas de vendedor
-    // carregam "MLB..." em parametros de filtro ou retorno (?item_id=MLB123);
-    // se testassemos a URL completa, uma listagem inteira seria atribuida a
-    // um unico codigo com limite = body. O MLB de anuncio de verdade fica
-    // sempre no caminho (produto.mercadolivre.com.br/MLB-123...-p/MLB123...).
+    // So o PATH da URL, nunca a query: telas de vendedor carregam "MLB..." em
+    // parametros de filtro (?item_id=MLB123), e a listagem inteira seria
+    // atribuida a um codigo so.
     const naUrl = url.split("?")[0].match(PADRAO_CODIGO);
     if (naUrl) {
       return { codigo: naUrl[1] + naUrl[2], limite: doc.body };
@@ -455,27 +403,16 @@ var MLMetricsLeitura = (function () {
     let atual = elemento;
 
     for (let nivel = 0; nivel < MAX_NIVEIS && atual; nivel++) {
-      // querySelectorAll so existe em Element (nao em nos de texto),
-      // por isso a checagem antes de chamar.
       if (atual.querySelectorAll) {
         const codigos = codigosDentroDe(atual);
 
-        // Exatamente um anuncio aqui dentro: nao ha ambiguidade, e dele.
-        // Este elemento tambem vira o LIMITE da busca pelo valor: tudo que
-        // pertence a este anuncio esta aqui dentro, e o que esta fora e de
-        // outro. Amarrar as duas buscas na mesma fronteira impede que um
-        // anuncio herde o numero do vizinho.
         if (codigos.length === 1) {
           return { codigo: codigos[0], limite: atual };
         }
 
-        // Mais de um: subimos demais e ja estamos num container que
-        // abraca varios cards. O rotulo que disparou a busca pertence a
-        // UM deles, e nao temos como saber qual - entao desistimos.
-        //
-        // Desistir e melhor que chutar o primeiro: um numero atribuido ao
-        // anuncio errado e pior do que numero nenhum, porque nao tem como
-        // a vendedora perceber que esta errado.
+        // Mais de um: ja estamos num container que abraca varios cards, e
+        // nao da para saber de qual e o rotulo. Um numero no anuncio errado
+        // e pior do que nenhum - ninguem percebe que esta errado.
         if (codigos.length > 1) {
           if (saida) {
             saida.motivo = "bloco com " + codigos.length +
@@ -497,14 +434,10 @@ var MLMetricsLeitura = (function () {
   /**
    * Lista os codigos de anuncio distintos que aparecem dentro de um elemento.
    *
-   * Um card de "Minhas publicacoes" pode ter link do ITEM e tambem link do
-   * produto de CATALOGO (/p/MLB...) ou do user product (/up/MLBU...) do mesmo
-   * anuncio. Contados juntos, dariam dois codigos - e o card seria ignorado
-   * por ambiguidade (#38). Por isso separamos pelo ENDERECO do link: havendo
-   * exatamente UM item, os links de catalogo/user product em volta sao do
-   * mesmo anuncio, e o codigo e o do item - que e tambem o que o painel procura
-   * primeiro (ver codigosDaPagina no calculo.js). Dois itens diferentes
-   * continuam sendo ambiguidade.
+   * Um card pode ter link do ITEM e tambem do produto de catalogo (/p/) ou do
+   * user product (/up/) do mesmo anuncio. Havendo item, valem so os itens -
+   * os agrupadores em volta sao do mesmo anuncio. Sem item, valem os
+   * agrupadores. Dois codigos na lista que vale = ambiguidade.
    *
    * @param {Element} elemento
    * @returns {string[]}
@@ -520,83 +453,61 @@ var MLMetricsLeitura = (function () {
       if (!achado) continue;
 
       const codigo = achado[1] + achado[2];
-
-      // Catalogo (/p/) e user product (/up/) agrupam anuncios; o resto e o
-      // proprio anuncio.
       const lista = /\/(p|up)\/MLB/.test(href) ? agrupadores : itens;
 
-      // O mesmo anuncio costuma ter varios links no card (a foto, o titulo,
-      // o botao). Contam como um so - por isso guardamos apenas os distintos.
+      // A foto, o titulo e o botao linkam o mesmo anuncio: conta uma vez.
       if (lista.indexOf(codigo) === -1) lista.push(codigo);
     }
 
-    // Havendo item, valem so os itens (um so = e dele; dois = ambiguo). Sem
-    // item nenhum, vale o que houver de catalogo/user product, pela mesma regra.
     return itens.length > 0 ? itens : agrupadores;
   }
 
   /**
    * Dado o elemento que contem o rotulo, encontra o valor correspondente.
    *
-   * O numero nem sempre mora junto do rotulo. Estes tres formatos sao todos
-   * plausiveis e aparecem no banco de teste:
+   * O numero nem sempre mora junto do rotulo:
    *
    *   <span>359 visitas</span>                    -> junto
    *   <span>1.234</span><span>visitas</span>      -> em irmaos
    *   <div><b>87</b></div><div><small>Visitas...  -> em ramos separados
    *
-   * A solucao para os tres e a mesma: subir no DOM. O textContent de um
-   * elemento inclui o texto de todos os descendentes, entao em algum nivel
-   * acima numero e rotulo acabam no mesmo texto - e ai lerRotulo() resolve.
-   * Paramos no primeiro nivel que der resposta, porque subir demais comeca a
-   * misturar dados de outros anuncios da mesma pagina.
+   * Subindo no DOM, em algum nivel numero e rotulo acabam no mesmo
+   * textContent - e ai lerRotulo() resolve. Paramos no primeiro nivel que
+   * responder, e nunca passamos do LIMITE do anuncio.
    *
    * @param {Element} elemento
    * @param {string} palavra
-   * @returns {Object|null} valor e trecho quando leu; recusa e trecho quando
-   *                        achou numero que nao pode usar; null sem nada
+   * @param {Element} limite bloco do anuncio (contextoDoAnuncio)
+   * @param {Document} doc
+   * @returns {Object|null} { valor, trecho } ou { recusa, trecho } - ou null
    */
   function valorDoRotulo(elemento, palavra, limite, doc) {
     let atual = elemento;
 
-    // Subimos no maximo ate o LIMITE - o elemento que delimita este anuncio.
-    // Sem essa trava, um rotulo em card sem numero faria a busca continuar
-    // subindo e encontrar o numero do anuncio de baixo.
     for (let nivel = 0; nivel < 5 && atual; nivel++) {
-      // Nunca lemos o textContent do BODY. Quando o codigo veio da URL
-      // (limite = doc.body), uma pagina rasa alcanca o body em poucos
-      // niveis - e o texto vira a pagina inteira, deixando o rotulo buscar
-      // numero em regiao nao relacionada. Antes de ler, recuamos um nivel
-      // quando o atual e o body.
+      // Nunca lemos o texto do BODY: seria a pagina inteira, com numero de
+      // regiao que nao tem nada a ver com o rotulo.
       if (atual !== doc.body) {
         const texto = atual.textContent;
 
-        // Bloco grande demais: paramos de subir. Numero e rotulo colados nunca
-        // precisam de um bloco desse tamanho, e a leitura custa proporcional ao
-        // texto - medido: cerca de 7 ms num bloco de 100 mil caracteres,
-        // repetido para cada rotulo e cada nivel. Numa pagina em que o codigo
-        // vem da URL (o limite e o body), isso podia travar a aba a cada
-        // varredura.
+        // Bloco grande demais: numero e rotulo colados nunca precisam disso,
+        // e a leitura custa proporcional ao texto.
         if (texto.length > LIMITE_TEXTO_POR_NIVEL) return null;
 
         const leitura = lerRotulo(texto, palavra);
 
         if (leitura !== null) {
-          // O RASTRO: o pedaco de texto exato em que o numero foi lido (ou
-          // recusado), neste nivel do DOM.
           const trecho = trechoDaLeitura(texto, leitura);
 
-          // Leitura recusada (ambigua, preco, data...): paramos de subir. Um
-          // nivel acima o texto so fica maior, e a fila pode parecer
-          // resolvida por acidente - colando o numero no rotulo errado.
+          // Recusada: paramos de subir. Um nivel acima o texto so cresce, e a
+          // fila pode parecer resolvida por acidente.
           if (leitura.recusa) return { recusa: leitura.recusa, trecho: trecho };
 
           return { valor: leitura.valor, trecho: trecho };
         }
       }
 
-      // Chegamos na fronteira do anuncio: daqui para cima ja e territorio
-      // de outro, entao paramos mesmo sem ter achado nada.
+      // Fronteira do anuncio: daqui para cima e territorio de outro.
       if (atual === limite) return null;
 
       atual = atual.parentElement;
@@ -606,25 +517,22 @@ var MLMetricsLeitura = (function () {
   }
 
   /**
-   * Monta o RASTRO de uma leitura: o texto exato que virou numero, marcado
-   * entre as aspas angulares (« e »), com um pouco de contexto dos
-   * dois lados. Exemplo, com colchetes no lugar das aspas:
+   * Monta o RASTRO de uma leitura: o texto exato que virou numero, entre « e
+   * », com 20 caracteres de contexto de cada lado:
    *
-   *   "Estoque 12 - [359 visitas] totais"
+   *   "Estoque 12 - «359 visitas» totais"
    *
-   * O contexto e o que permite a qualquer pessoa conferir o numero contra a
-   * tela do Mercado Livre - e perceber quando ele foi colado no rotulo
-   * errado. E curto de proposito (20 caracteres de cada lado): janela maior
-   * arrastaria titulo de anuncio e preco para dentro do cache.
+   * E o que permite conferir o numero contra a tela do ML. A janela e curta
+   * de proposito, para nao arrastar titulo e preco para dentro do cache.
    *
    * @param {string} texto o texto em que a leitura foi feita
-   * @param {Object} leitura valor, inicio e fim, vindos de lerRotulo
+   * @param {Object} leitura inicio e fim, vindos de lerRotulo
    * @returns {string}
    */
   function trechoDaLeitura(texto, leitura) {
     const CONTEXTO = 20;
 
-    // Espacos e quebras de linha da indentacao do HTML viram um espaco so.
+    // A indentacao do HTML vira um espaco so.
     function compactar(pedaco) {
       return pedaco.replace(/\s+/g, " ");
     }
@@ -643,12 +551,10 @@ var MLMetricsLeitura = (function () {
   /**
    * Filtro do TreeWalker: diz se um no de texto deve ser examinado.
    *
-   * SHOW_TEXT sozinho inclui o texto dentro de <script>, <style>, <template>
-   * e de conteudos ocultos. O ML embute JSONs gigantes em <script> com
-   * campos "visits" e "sold_quantity" ao lado de milhares de numeros - se
-   * um desses nos fosse lido, um numero do JSON entraria como metrica.
-   * Alem disso, varrer esse texto e caro: centenas de KB copiadas em
-   * minusculo a cada subida do DOM.
+   * Fica de fora o texto de <script>, <style>, <template>, <noscript> e
+   * [hidden] - o ML embute JSONs com "visits" e "sold_quantity" em <script>,
+   * e um numero dali entraria como metrica. aria-hidden NAO entra: o ML
+   * marca com ele numeros que APARECEM na tela (a parte visual do preco).
    *
    * @param {Node} no
    * @returns {number} NodeFilter.FILTER_ACCEPT ou FILTER_REJECT
@@ -656,16 +562,8 @@ var MLMetricsLeitura = (function () {
   function aceitarNoDeTextoTecnico(no) {
     const pai = no.parentElement;
 
-    // Sem pai, nao temos como saber o contexto - aceitamos por seguranca.
     if (!pai) return NodeFilter.FILTER_ACCEPT;
 
-    // Rejeita nos dentro de script, style e template, e tambem de:
-    //  - noscript: com o JavaScript ligado, o conteudo dele e texto cru que
-    //    nunca aparece na tela;
-    //  - [hidden]: atributo que tira o elemento da tela por completo.
-    // aria-hidden NAO entra: o ML marca com ele numeros que APARECEM na tela
-    // (a parte visual do preco tem aria-hidden="true"), escondendo so do
-    // leitor de tela. Rejeita-lo apagaria texto visivel.
     if (pai.closest("script, style, template, noscript, [hidden]")) {
       return NodeFilter.FILTER_REJECT;
     }
@@ -674,21 +572,25 @@ var MLMetricsLeitura = (function () {
   }
 
   /**
+   * Diz se o elemento foi desenhado pela propria extensao (painel ou aviso).
+   *
+   * @param {Element|null} elemento
+   * @returns {boolean}
+   */
+  function ehDaExtensao(elemento) {
+    return Boolean(elemento && elemento.closest(SELETOR_DA_EXTENSAO));
+  }
+
+  /**
    * Diz se a pagina parece TELA DE VENDEDOR: alguma mencao a "visita".
    *
-   * E o mesmo custo de pasta que usamos para achar "venda": o coletor
-   * diferencia as duas telas pelo vocabulario que cada uma usa. Pagina
-   * publica (busca, categoria, vitrine) tem "vendido" e "vendas" aos montes
-   * - todos de OUTRO vendedor - mas nunca "visita". A palavra "visita" so
-   * existe em telas que acompanham o anuncio de quem vende.
-   *
-   * Os guardas precisam ser os MESMOS da varredura principal: nao entrar em
-   * script/style/template e nao contar o que a propria extensao desenhou.
-   * Se o painel dissesse "Visitas" e contasse como sinal, um anuncio publico
-   * exibido com painel viraria "tela de vendedor" so por causa do painel.
+   * Pagina publica (busca, vitrine) tem "vendido" e "vendas" aos montes -
+   * todos de OUTRO vendedor - mas nunca "visita", que so existe em telas de
+   * quem vende. O painel da extensao nao conta, senao um anuncio publico com
+   * painel viraria "tela de vendedor".
    *
    * @param {Document} doc
-   * @returns {boolean} vale a pena varrer a pagina?
+   * @returns {boolean}
    */
   function paginaMencionaVisita(doc) {
     const caminhante = doc.createTreeWalker(
@@ -701,10 +603,8 @@ var MLMetricsLeitura = (function () {
 
     while (no) {
       const texto = (no.nodeValue || "").toLowerCase();
-      const elemento = no.parentElement;
 
-      if (elemento &&
-          !elemento.closest("#mlmetrics-painel, #mlmetrics-aviso") &&
+      if (no.parentElement && !ehDaExtensao(no.parentElement) &&
           texto.indexOf("visita") !== -1) {
         return true;
       }
@@ -718,28 +618,23 @@ var MLMetricsLeitura = (function () {
   /**
    * Percorre todos os textos da pagina procurando rotulos de metrica.
    *
-   * Usamos TreeWalker em vez de querySelectorAll("*") porque ele percorre
-   * diretamente os NOS DE TEXTO, que e onde as palavras realmente moram.
-   * E mais rapido e evita pegar o mesmo texto varias vezes (o textContent
-   * de um elemento pai repete o texto de todos os filhos).
+   * TreeWalker em vez de querySelectorAll("*"): ele percorre os NOS DE TEXTO,
+   * onde as palavras moram, sem repetir o texto dos filhos em cada pai.
    *
    * @param {Document} doc
    * @param {string} url endereco da pagina
    * @param {Array} [recusas] quando passado (so no diagnostico), recebe cada
    *                          rotulo que NAO virou numero, com o motivo
-   * @returns {Object} mapa { MLB123: { visitas: 359 }, ... }
+   * @returns {Object} mapa { MLB123: { visitas: 359, origem: {...} }, ... }
    */
   function varrerPagina(doc, url, recusas) {
-    // Pagina sem "visita" nao e tela de vendedor: qualquer "vendido" que ela
-    // mostre pertence a produto publico de OUTRO vendedor. A varredura
-    // inteira e descartada antes de comecar (sairia daqui cheia de numeros
-    // com cara de certo, que e o pior modo de erro deste coletor).
+    // Sem "visita" nao e tela de vendedor: qualquer "vendido" ali e de OUTRO
+    // vendedor.
     if (!paginaMencionaVisita(doc)) return {};
 
     const resultado = {};
 
-    // Em qual tela a leitura acontece, para o rastro de origem. Mascarado
-    // (ver caminhoMascarado): diz a FORMA da rota, sem codigo nem titulo.
+    // Em qual tela a leitura acontece, para o rastro - so a forma da rota.
     let tela;
     try {
       tela = caminhoMascarado(new URL(url).pathname);
@@ -749,29 +644,17 @@ var MLMetricsLeitura = (function () {
 
     const caminhante = doc.createTreeWalker(
       doc.body,
-      NodeFilter.SHOW_TEXT,  // so nos de texto, ignora tags e comentarios
-      aceitarNoDeTextoTecnico  // mas NAO o texto de script/style/template
+      NodeFilter.SHOW_TEXT,
+      aceitarNoDeTextoTecnico
     );
 
     let no = caminhante.nextNode();
 
     while (no) {
-      // Comparamos em minusculo para pegar "Visitas", "visitas", "VISITAS".
       const texto = (no.nodeValue || "").toLowerCase();
       const elemento = no.parentElement;
 
-      // Pulamos o que a propria extensao desenhou na tela.
-      //
-      // O painel do content.js exibe as palavras "Visitas" e "Vendas" junto
-      // dos numeros. Sem esta guarda, o coletor leria a propria saida como
-      // se fosse dado do Mercado Livre e a realimentaria no cache - um
-      // sistema se confirmando sozinho, que e a pior especie de bug porque
-      // os numeros continuam parecendo plausiveis.
-      //
-      // closest() sobe pelos ancestrais procurando quem casa com o seletor.
-      if (elemento && !elemento.closest("#mlmetrics-painel, #mlmetrics-aviso")) {
-        // Primeiro checamos se o texto menciona ALGUMA metrica que
-        // conhecemos. So entao vale a pena a busca pelo contexto.
+      if (elemento && !ehDaExtensao(elemento)) {
         const menciona = Object.keys(ROTULOS).some(function (metrica) {
           return ROTULOS[metrica].some(function (palavra) {
             return texto.indexOf(palavra) !== -1;
@@ -779,15 +662,11 @@ var MLMetricsLeitura = (function () {
         });
 
         if (menciona) {
-          // O contexto do anuncio (quem e, e ate onde buscar o valor) NAO
-          // depende da palavra - e do elemento. Calcula-lo dentro do laco
-          // de palavras faria cada sinonimo refazer os querySelectorAll ate
-          // 12 niveis de ancestral: na tela de listagem, com 50 cards, eram
-          // milhares de varreduras quase do documento inteiro.
+          // O contexto depende do elemento, nao da palavra: calculado uma vez
+          // aqui, e nao para cada sinonimo.
           const saida = {};
           const contexto = contextoDoAnuncio(elemento, doc, url, saida);
 
-          // Rotulo sem anuncio definido: no diagnostico, anota o porque.
           if (!contexto && recusas) {
             recusas.push({
               motivo: saida.motivo,
@@ -798,19 +677,14 @@ var MLMetricsLeitura = (function () {
           if (contexto) {
             const codigo = contexto.codigo;
 
-            // Para cada metrica que conhecemos, testamos todas as palavras
-            // que podem indica-la neste texto.
             Object.keys(ROTULOS).forEach(function (metrica) {
               ROTULOS[metrica].forEach(function (palavra) {
-                // indexOf(...) !== -1 significa "contem".
                 if (texto.indexOf(palavra) === -1) return;
 
                 const leitura = valorDoRotulo(elemento, palavra, contexto.limite, doc);
 
-                // So guardamos com as duas pontas: de qual anuncio, e quanto.
-                // Sem leitura, ou com leitura recusada, nada vai para o cache -
-                // e o diagnostico (quando pedido) guarda o porque. E isso que
-                // responde "por que as vendas nao apareceram?".
+                // Sem leitura, ou recusada: nada vai para o cache, e o
+                // diagnostico (quando pedido) guarda o porque.
                 if (leitura === null || leitura.recusa) {
                   if (recusas) {
                     recusas.push({
@@ -827,15 +701,12 @@ var MLMetricsLeitura = (function () {
 
                 if (!resultado[codigo]) resultado[codigo] = { origem: {} };
 
-                // Ficamos com o MAIOR valor encontrado na pagina para cada
-                // metrica. Telas costumam mostrar recortes lado a lado
-                // ("visitas hoje" e "visitas totais") e o total e o que interessa.
+                // O MAIOR valor da pagina vence: telas mostram recortes lado a
+                // lado ("visitas hoje", "visitas totais") e o total interessa.
+                // O rastro acompanha o numero que venceu.
                 const atual = resultado[codigo][metrica];
                 if (atual === undefined || leitura.valor > atual) {
                   resultado[codigo][metrica] = leitura.valor;
-
-                  // O rastro acompanha o numero que venceu: e a prova de onde
-                  // ELE saiu, nao de uma leitura que foi descartada.
                   resultado[codigo].origem[metrica] = {
                     trecho: leitura.trecho,
                     tela: tela
@@ -850,19 +721,10 @@ var MLMetricsLeitura = (function () {
       no = caminhante.nextNode();
     }
 
-    // A regra que fecha o ciclo: so tela de VENDEDOR entrega numeros, e tela
-    // de vendedor SEMPRE mostra visitas. Se a pagina leu apenas vendas - com
-    // qualquer sobra de "visita" num banner ou modulo - ela e publica, com
-    // vendedores alheios, e os numeros achados nao prestam. O cache real que
-    // gerou esta regra tinha 137 anuncios "de dezenas de vendedores" e ZERO
-    // visitas: todos vieram de paginas publicas. Visitas e a metrica que a
-    // pagina publica nunca exibe, entao sem visita lida nao ha captura.
-    //
-    // E a regra vale POR ANUNCIO, nao pela pagina inteira. Antes bastava UM
-    // card ter visitas para qualquer outro codigo, so com vendas, passar - e
-    // um modulo de terceiros dentro da tela de vendedor ("mais vendidos",
-    // recomendados) gravaria "+1.000 vendidos" num produto alheio. Codigo sem
-    // visita lida nesta varredura fica de fora inteiro: na duvida, nao grava.
+    // Tela de vendedor SEMPRE mostra visitas, e a pagina publica nunca. Por
+    // isso, POR ANUNCIO: codigo sem visita lida nesta varredura fica de fora
+    // inteiro - um modulo de terceiros dentro da tela de vendedor ("mais
+    // vendidos") gravaria "+1.000 vendidos" num produto alheio.
     const comVisitas = {};
 
     Object.keys(resultado).forEach(function (codigo) {
@@ -885,14 +747,9 @@ var MLMetricsLeitura = (function () {
   /**
    * Anota as leituras em que as vendas passam das visitas - sem descartar.
    *
-   * A regra antiga era "e impossivel vender mais do que visitar", e o anuncio
-   * inteiro era descartado. Nao e impossivel (#40): no ML "vendidos" conta
-   * UNIDADES, e um comprador leva varias numa visita so. Descartar apagava em
-   * silencio justamente o anuncio que vende em quantidade.
-   *
-   * Hoje os numeros ficam - cada um com o rastro de onde saiu, para ser
-   * conferido - e o painel mostra um alerta (content.js). Aqui so registramos
-   * no console e, quando o diagnostico pede, na lista de recusas como AVISO.
+   * Nao e impossivel (#40): "vendidos" conta UNIDADES, e um comprador leva
+   * varias numa visita so. Os numeros ficam, o painel mostra um alerta, e
+   * aqui so avisamos no console e, no diagnostico, como AVISO.
    *
    * @param {Object} resultado
    * @param {Array} [recusas] quando passado, recebe um aviso por anuncio
@@ -902,7 +759,6 @@ var MLMetricsLeitura = (function () {
     Object.keys(resultado).forEach(function (codigo) {
       const dados = resultado[codigo];
 
-      // So da para comparar quando temos as duas metricas.
       const comparavel = (dados.visitas !== undefined && dados.vendas !== undefined);
       if (!comparavel || dados.vendas <= dados.visitas) return;
 
@@ -924,12 +780,11 @@ var MLMetricsLeitura = (function () {
   }
 
   /**
-   * Janela de texto em volta do rotulo, para o diagnostico e para o trecho
-   * das recusas da varredura.
+   * Janela de texto em volta do rotulo (20 antes, 80 depois), para o
+   * diagnostico e as recusas.
    *
-   * O pai do rotulo pode guardar coisa demais (titulo, preco, nome de
-   * comprador). Perfurar ate o rotulo e mostrar so o que esta colado nele
-   * mostra onde o numero costuma estar sem vazar o resto do card.
+   * So o que esta colado no rotulo: o pai inteiro pode ter titulo, preco e
+   * nome de comprador, que nao devem sair daqui.
    *
    * @param {Node} no no de texto do rotulo
    * @param {string} rotulo texto do no, ja com trim
@@ -942,8 +797,6 @@ var MLMetricsLeitura = (function () {
     const todo = pai.textContent || "";
     const orig = no.nodeValue || "";
 
-    // textContent concatena os nos filhos sem separador; procurar o
-    // nodeValue original acha a posicao exata do rotulo.
     const pos = todo.indexOf(orig);
     if (pos === -1) return rotulo;
 
@@ -957,28 +810,18 @@ var MLMetricsLeitura = (function () {
   /**
    * Le o "N vendido(s)" DO ANUNCIO numa pagina publica de produto.
    *
-   * A pagina de produto nao mostra visitas - elas so existem para quem e dono
-   * do anuncio. Mas mostra quantas unidades ja foram vendidas, e esse numero
-   * e do anuncio. E o unico dado real que da para mostrar a quem abre um
-   * anuncio que nao e seu.
+   * A mesma pagina traz "+1000 vendas" da REPUTACAO do vendedor e "+100
+   * vendidos" dos recomendados - ler isso sem cuidado ja fez um anuncio de
+   * uma venda exibir mil (#34). As travas:
    *
-   * O perigo aqui tem historia: a mesma pagina traz "+1000 vendas" da
-   * REPUTACAO do vendedor e "+100 vendidos" dos produtos recomendados. Ler
-   * isso sem cuidado foi o pior defeito do projeto (#34), com um anuncio de
-   * uma venda exibindo mil. As travas, em camadas:
-   *
-   *   - so a palavra "vendido/vendida", nunca "venda/vendas" - a reputacao
-   *     do vendedor fala em "vendas";
-   *   - numero exato colado ao rotulo (lerRotulo); "+100", "+1.000" e
-   *     "+10mil" sao recusados por motivoDoNumero;
-   *   - se sobrar MAIS DE UM valor diferente na pagina, nao devolve nada:
-   *     na duvida, nao mostra.
-   *
-   * Conferido na pagina real salva: o anuncio aparece uma vez ("Novo | 1
-   * vendido") e todos os outros sao "+N vendidos", que caem nas recusas.
+   *   - so "vendido/vendida", nunca "venda/vendas" (a reputacao usa "vendas");
+   *   - o subtitulo do anuncio ("Novo | 1 vendido") vence tudo - os
+   *     recomendados nao tem a condicao junto;
+   *   - sem subtitulo, so numero exato; "+N" e recusado por motivoDoNumero;
+   *   - mais de um valor diferente na pagina: nao devolve nada.
    *
    * @param {Document} doc
-   * @returns {Object|null} { valor, trecho } ou null
+   * @returns {Object|null} { valor, aproximado, trecho } ou null
    */
   function vendidosDaPagina(doc) {
     const caminhante = doc.createTreeWalker(
@@ -987,10 +830,6 @@ var MLMetricsLeitura = (function () {
       aceitarNoDeTextoTecnico
     );
 
-    // O anuncio anuncia a propria condicao junto do total: "Novo | 1
-    // vendido", "Usado | +25 vendidos". Os produtos recomendados da mesma
-    // pagina aparecem como "+100 vendidos", sem condicao nenhuma - e e isso
-    // que separa um do outro. Conferido nas duas paginas reais salvas.
     const SUBTITULO = /(novo|usado|recondicionado)[^\d+]{0,4}(\+?)\s*([\d.]+)\s*vendid[oa]s?/i;
 
     const doSubtitulo = [];
@@ -999,13 +838,9 @@ var MLMetricsLeitura = (function () {
 
     while (no) {
       const texto = (no.nodeValue || "").trim();
-      const elemento = no.parentElement;
-      const daExtensao = Boolean(elemento &&
-        elemento.closest("#mlmetrics-painel, #mlmetrics-aviso"));
 
-      // Texto curto: "1 vendido" e um rotulo, nao um paragrafo que menciona
-      // a palavra.
-      if (!daExtensao && texto.length > 0 && texto.length < 120 &&
+      // Texto curto: "1 vendido" e um rotulo, nao um paragrafo.
+      if (!ehDaExtensao(no.parentElement) && texto.length > 0 && texto.length < 120 &&
           /vendid[oa]s?/i.test(texto)) {
         const subtitulo = texto.match(SUBTITULO);
 
@@ -1017,9 +852,8 @@ var MLMetricsLeitura = (function () {
           })) {
             doSubtitulo.push({
               valor: valor,
-              // "+25 vendidos" quer dizer "mais de 25": o numero certo esta
-              // entre 25 e o proximo degrau. Mostrar 25 como exato seria
-              // mentira; o painel mostra "+25".
+              // "+25 vendidos" quer dizer "mais de 25": o painel mostra "+25",
+              // nunca 25 como exato.
               aproximado: Boolean(subtitulo[2]),
               trecho: "«" + texto + "»"
             });
@@ -1041,8 +875,6 @@ var MLMetricsLeitura = (function () {
       no = caminhante.nextNode();
     }
 
-    // O subtitulo do anuncio vale mais que qualquer outro "vendido" da
-    // pagina. Sem ele, so um numero EXATO e unico serve.
     if (doSubtitulo.length === 1) return doSubtitulo[0];
 
     return exatos.length === 1 ? exatos[0] : null;
@@ -1053,15 +885,11 @@ var MLMetricsLeitura = (function () {
   // --------------------------------------------------------------------------
 
   /**
-   * Diz se esta tela JA entregou numeros alguma vez (esta na lista de
-   * origens aprendidas).
+   * Diz se esta tela JA entregou numeros alguma vez (esta nas origens).
    *
-   * Serve para separar "tela que nunca deu nada" de "tela que dava e parou".
-   * A primeira e a maioria das paginas do ML e nao significa nada; a segunda
-   * e sinal de que o site mudou (ver marcarTelaFalhando no coletor.js).
-   *
-   * Compara sem a query, do mesmo jeito que as origens sao guardadas: os
-   * filtros e a paginacao da tela mudam a query o tempo todo.
+   * Separa "tela que nunca deu nada" (a maioria, normal) de "tela que dava e
+   * parou" (sinal de que o ML mudou). Compara sem a query, como as origens
+   * sao guardadas.
    *
    * @param {string} url endereco da pagina
    * @param {string[]|undefined} origens telas que ja entregaram numeros
@@ -1078,44 +906,17 @@ var MLMetricsLeitura = (function () {
   /**
    * Diz se estamos numa pagina de compra - a vitrine publica do produto.
    *
-   * O coletor NAO deve agir aqui, e a razao vale a pena entender.
+   * O coletor NAO age aqui: a pagina mistura "1 vendido" (do ANUNCIO) com
+   * "+1.000 vendas" (do VENDEDOR), com as mesmas palavras, e tudo seria
+   * atribuido ao anuncio da URL.
    *
-   * Essa pagina mistura metricas de dois donos diferentes:
+   * Detectamos pela URL:
+   *   - HOST: a vitrine classica mora em produto./articulo.mercadolivre;
+   *   - CAMINHO: /up/MLBU... e /p/MLB... (as vezes seguidos de "/s", a lista
+   *     de vendedores do catalogo) ficam no mesmo host das telas de vendedor,
+   *     mas nenhuma tela de vendedor usa essas rotas.
    *
-   *   "1 vendido"        -> do ANUNCIO
-   *   "+1.000 vendas"    -> do VENDEDOR (reputacao dele na plataforma)
-   *
-   * As duas usam as mesmas palavras e ficam na mesma pagina, entao nao ha
-   * como distinguir pelo texto. E como a URL identifica um anuncio, tudo
-   * que fosse lido aqui seria atribuido a ele - inclusive o numero que e
-   * do vendedor. Foi exatamente assim que um anuncio com uma venda passou
-   * a exibir mil.
-   *
-   * O coletor existe para as telas de vendedor, onde cada numero pertence
-   * ao anuncio do seu card. Aqui a extensao so exibe, nunca captura.
-   *
-   * Detectamos a vitrine pela URL. Dois sinais, ambos sujos de fingir que
-   * sao host ou caminho:
-   *
-   *   - HOST: a vitrine classica mora em subdominio proprio
-   *     (produto.mercadolivre.com.br, articulo.mercadolivre.com.br) que
-   *     nenhuma tela de vendedor usa.
-   *   - CAMINHO: a estrutura NOVA (/up/MLBU...) e a de catalogo (/p/MLB...)
-   *     ficam no host www.mercadolivre.com.br - o MESMO das telas de
-   *     vendedor - entao o host sozinho nao basta. Nessas rotas o codigo do
-   *     produto vem logo depois de "/up/" ou "/p/", as vezes seguido de mais
-   *     um segmento: "/p/MLB.../s" e a lista de vendedores do catalogo,
-   *     cheia de "+N vendas" de reputacao. Nenhuma tela de vendedor usa
-   *     essas rotas.
-   *
-   * Comparar texto nao e confiavel - as palavras dos botoes mudam e, pior,
-   * qualquer ocorrencia delas num <script> ou template oculto desligaria o
-   * coletor sem deixar rastro. E ler o textContent de toda a pagina,
-   * incluindo os JSONs dos scripts, era caro a cada varredura.
-   *
-   * Recebe a URL por parametro para poder ser testada fora do navegador.
-   *
-   * @param {string} url endereco da pagina (window.location.href)
+   * @param {string} url endereco da pagina
    * @returns {boolean}
    */
   function ehPaginaDeCompra(url) {
@@ -1127,13 +928,11 @@ var MLMetricsLeitura = (function () {
       host = endereco.hostname;
       path = endereco.pathname;
     } catch (e) {
-      return false;  // endereco invalido: nao e vitrine
+      return false;
     }
 
     return host.indexOf("produto.mercadolivre") !== -1 ||
            host.indexOf("articulo.mercadolivre") !== -1 ||
-           // "/up/MLBU1234567890" (layout novo) e "/p/MLB12345678" (catalogo),
-           // no fim do caminho ou seguidos de outro segmento ("/p/MLB.../s").
            // O (\/|$) exige que o codigo termine ali: numa barra ou no fim.
            /\/up\/MLB[A-Z]?\d{6,}(\/|$)/.test(path) ||
            /\/p\/MLB\d{6,}(\/|$)/.test(path);
@@ -1142,41 +941,36 @@ var MLMetricsLeitura = (function () {
   /**
    * Caminho da URL com o que pode identificar alguem trocado por marcas.
    *
-   * O diagnostico precisa dizer EM QUAL TELA a leitura aconteceu - so o host
-   * ("www.mercadolivre.com.br") vale para o site inteiro e nao separa a
-   * homepage de "Minhas publicacoes". Mas o caminho completo pode carregar
-   * codigo de anuncio, id de vendedor e o titulo do produto. Guardamos a
-   * FORMA da rota, sem esses dados:
+   * Diz EM QUAL TELA algo aconteceu sem levar codigo de anuncio, id de
+   * vendedor ou titulo de produto:
    *
    *   /anuncios/lista                        -> /anuncios/lista
    *   /vendas/12345678/detalhe               -> /vendas/#/detalhe
    *   /kit-2-caixa-organizadora/up/MLBU123   -> /(titulo)/up/MLBU#
    *
-   * Titulo e reconhecido pelo formato de slug: muitas palavras ligadas por
-   * hifen. Rota de sistema tem no maximo tres ("publicaciones-y-ventas").
+   * Titulo e slug com muitas palavras ligadas por hifen; rota de sistema tem
+   * no maximo tres ("publicaciones-y-ventas").
    *
    * @param {string} caminho pathname da URL
    * @returns {string}
    */
   function caminhoMascarado(caminho) {
     return caminho.split("/").map(function (trecho) {
-      // Slug de titulo: muitas palavras ligadas por hifen.
       if (trecho.split("-").length > 3) return "(titulo)";
 
-      // Codigo de anuncio, id de vendedor, numero de pedido: os digitos somem,
-      // a letra do prefixo fica ("MLBU#") - ela diz o TIPO de codigo.
+      // Os digitos somem, a letra do prefixo fica ("MLBU#"): ela diz o TIPO.
       return trecho.replace(/\d+/g, "#");
     }).join("/");
   }
 
-  // Tudo publico. O coletor.js e o diagnostico.js usam as funcoes de varrer,
-  // de escopo e de endereco; as pecas menores (paraInteiro, lerRotulo...)
-  // ficam expostas para o teste em Node cobrar cada uma diretamente.
+  // Tudo publico: o coletor, o diagnostico e o calculo usam as funcoes de
+  // varrer, escopo e endereco; as pecas menores ficam expostas para o teste.
   return {
     MAX_NIVEIS: MAX_NIVEIS,
     LIMITE_TEXTO_POR_NIVEL: LIMITE_TEXTO_POR_NIVEL,
     ROTULOS: ROTULOS,
     PADRAO_CODIGO: PADRAO_CODIGO,
+    SELETOR_DA_EXTENSAO: SELETOR_DA_EXTENSAO,
     paraInteiro: paraInteiro,
     numeroAntesDe: numeroAntesDe,
     lerRotulo: lerRotulo,
@@ -1191,6 +985,7 @@ var MLMetricsLeitura = (function () {
     valorDoRotulo: valorDoRotulo,
     trechoDaLeitura: trechoDaLeitura,
     aceitarNoDeTextoTecnico: aceitarNoDeTextoTecnico,
+    ehDaExtensao: ehDaExtensao,
     paginaMencionaVisita: paginaMencionaVisita,
     varrerPagina: varrerPagina,
     anotarImplausiveis: anotarImplausiveis,
