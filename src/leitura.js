@@ -582,6 +582,37 @@ var MLMetricsLeitura = (function () {
   }
 
   /**
+   * Percorre os textos VISIVEIS da pagina, um no de texto por vez - o unico
+   * jeito de varrer a pagina neste projeto (leitura, portao e diagnostico).
+   *
+   * Duas guardas que todo percurso precisa, e que por isso moram so aqui:
+   *   - o filtro tecnico (aceitarNoDeTextoTecnico): nada de script, style,
+   *     template, noscript ou [hidden];
+   *   - nada do que a propria extensao desenhou (ehDaExtensao).
+   *
+   * TreeWalker em vez de querySelectorAll("*"): ele percorre os NOS DE TEXTO,
+   * onde as palavras moram, sem repetir o texto dos filhos em cada pai.
+   *
+   * @param {Document} doc
+   * @param {Function} visitar recebe (no, elemento pai); devolver true para
+   *                           o percurso ali
+   */
+  function paraCadaTexto(doc, visitar) {
+    const caminhante = doc.createTreeWalker(
+      doc.body,
+      NodeFilter.SHOW_TEXT,
+      aceitarNoDeTextoTecnico
+    );
+
+    let no = caminhante.nextNode();
+
+    while (no) {
+      if (!ehDaExtensao(no.parentElement) && visitar(no, no.parentElement) === true) return;
+      no = caminhante.nextNode();
+    }
+  }
+
+  /**
    * Diz se a pagina parece TELA DE VENDEDOR: alguma mencao a "visita".
    *
    * Pagina publica (busca, vitrine) tem "vendido" e "vendas" aos montes -
@@ -593,33 +624,18 @@ var MLMetricsLeitura = (function () {
    * @returns {boolean}
    */
   function paginaMencionaVisita(doc) {
-    const caminhante = doc.createTreeWalker(
-      doc.body,
-      NodeFilter.SHOW_TEXT,
-      aceitarNoDeTextoTecnico
-    );
+    let achou = false;
 
-    let no = caminhante.nextNode();
+    paraCadaTexto(doc, function (no, elemento) {
+      achou = Boolean(elemento) && (no.nodeValue || "").toLowerCase().indexOf("visita") !== -1;
+      return achou;
+    });
 
-    while (no) {
-      const texto = (no.nodeValue || "").toLowerCase();
-
-      if (no.parentElement && !ehDaExtensao(no.parentElement) &&
-          texto.indexOf("visita") !== -1) {
-        return true;
-      }
-
-      no = caminhante.nextNode();
-    }
-
-    return false;
+    return achou;
   }
 
   /**
    * Percorre todos os textos da pagina procurando rotulos de metrica.
-   *
-   * TreeWalker em vez de querySelectorAll("*"): ele percorre os NOS DE TEXTO,
-   * onde as palavras moram, sem repetir o texto dos filhos em cada pai.
    *
    * @param {Document} doc
    * @param {string} url endereco da pagina
@@ -642,84 +658,73 @@ var MLMetricsLeitura = (function () {
       tela = "(url invalida)";
     }
 
-    const caminhante = doc.createTreeWalker(
-      doc.body,
-      NodeFilter.SHOW_TEXT,
-      aceitarNoDeTextoTecnico
-    );
+    paraCadaTexto(doc, function (no, elemento) {
+      if (!elemento) return;
 
-    let no = caminhante.nextNode();
-
-    while (no) {
       const texto = (no.nodeValue || "").toLowerCase();
-      const elemento = no.parentElement;
 
-      if (elemento && !ehDaExtensao(elemento)) {
-        const menciona = Object.keys(ROTULOS).some(function (metrica) {
-          return ROTULOS[metrica].some(function (palavra) {
-            return texto.indexOf(palavra) !== -1;
-          });
+      const menciona = Object.keys(ROTULOS).some(function (metrica) {
+        return ROTULOS[metrica].some(function (palavra) {
+          return texto.indexOf(palavra) !== -1;
         });
+      });
+      if (!menciona) return;
 
-        if (menciona) {
-          // O contexto depende do elemento, nao da palavra: calculado uma vez
-          // aqui, e nao para cada sinonimo.
-          const saida = {};
-          const contexto = contextoDoAnuncio(elemento, doc, url, saida);
+      // O contexto depende do elemento, nao da palavra: calculado uma vez
+      // aqui, e nao para cada sinonimo.
+      const saida = {};
+      const contexto = contextoDoAnuncio(elemento, doc, url, saida);
 
-          if (!contexto && recusas) {
-            recusas.push({
-              motivo: saida.motivo,
-              trecho: contextoDoTexto(no, (no.nodeValue || "").trim())
-            });
-          }
-
-          if (contexto) {
-            const codigo = contexto.codigo;
-
-            Object.keys(ROTULOS).forEach(function (metrica) {
-              ROTULOS[metrica].forEach(function (palavra) {
-                if (texto.indexOf(palavra) === -1) return;
-
-                const leitura = valorDoRotulo(elemento, palavra, contexto.limite, doc);
-
-                // Sem leitura, ou recusada: nada vai para o cache, e o
-                // diagnostico (quando pedido) guarda o porque.
-                if (leitura === null || leitura.recusa) {
-                  if (recusas) {
-                    recusas.push({
-                      codigo: codigo,
-                      metrica: metrica,
-                      motivo: leitura ? leitura.recusa : "nenhum numero colado ao rotulo",
-                      trecho: leitura
-                        ? leitura.trecho
-                        : contextoDoTexto(no, (no.nodeValue || "").trim())
-                    });
-                  }
-                  return;
-                }
-
-                if (!resultado[codigo]) resultado[codigo] = { origem: {} };
-
-                // O MAIOR valor da pagina vence: telas mostram recortes lado a
-                // lado ("visitas hoje", "visitas totais") e o total interessa.
-                // O rastro acompanha o numero que venceu.
-                const atual = resultado[codigo][metrica];
-                if (atual === undefined || leitura.valor > atual) {
-                  resultado[codigo][metrica] = leitura.valor;
-                  resultado[codigo].origem[metrica] = {
-                    trecho: leitura.trecho,
-                    tela: tela
-                  };
-                }
-              });
-            });
-          }
+      if (!contexto) {
+        if (recusas) {
+          recusas.push({
+            motivo: saida.motivo,
+            trecho: contextoDoTexto(no, (no.nodeValue || "").trim())
+          });
         }
+        return;
       }
 
-      no = caminhante.nextNode();
-    }
+      const codigo = contexto.codigo;
+
+      Object.keys(ROTULOS).forEach(function (metrica) {
+        ROTULOS[metrica].forEach(function (palavra) {
+          if (texto.indexOf(palavra) === -1) return;
+
+          const leitura = valorDoRotulo(elemento, palavra, contexto.limite, doc);
+
+          // Sem leitura, ou recusada: nada vai para o cache, e o diagnostico
+          // (quando pedido) guarda o porque.
+          if (leitura === null || leitura.recusa) {
+            if (recusas) {
+              recusas.push({
+                codigo: codigo,
+                metrica: metrica,
+                motivo: leitura ? leitura.recusa : "nenhum numero colado ao rotulo",
+                trecho: leitura
+                  ? leitura.trecho
+                  : contextoDoTexto(no, (no.nodeValue || "").trim())
+              });
+            }
+            return;
+          }
+
+          if (!resultado[codigo]) resultado[codigo] = { origem: {} };
+
+          // O MAIOR valor da pagina vence: telas mostram recortes lado a lado
+          // ("visitas hoje", "visitas totais") e o total interessa. O rastro
+          // acompanha o numero que venceu.
+          const atual = resultado[codigo][metrica];
+          if (atual === undefined || leitura.valor > atual) {
+            resultado[codigo][metrica] = leitura.valor;
+            resultado[codigo].origem[metrica] = {
+              trecho: leitura.trecho,
+              tela: tela
+            };
+          }
+        });
+      });
+    });
 
     // Tela de vendedor SEMPRE mostra visitas, e a pagina publica nunca. Por
     // isso, POR ANUNCIO: codigo sem visita lida nesta varredura fica de fora
@@ -824,56 +829,46 @@ var MLMetricsLeitura = (function () {
    * @returns {Object|null} { valor, aproximado, trecho } ou null
    */
   function vendidosDaPagina(doc) {
-    const caminhante = doc.createTreeWalker(
-      doc.body,
-      NodeFilter.SHOW_TEXT,
-      aceitarNoDeTextoTecnico
-    );
-
     const SUBTITULO = /(novo|usado|recondicionado)[^\d+]{0,4}(\+?)\s*([\d.]+)\s*vendid[oa]s?/i;
 
     const doSubtitulo = [];
     const exatos = [];
-    let no = caminhante.nextNode();
 
-    while (no) {
+    paraCadaTexto(doc, function (no) {
       const texto = (no.nodeValue || "").trim();
 
       // Texto curto: "1 vendido" e um rotulo, nao um paragrafo.
-      if (!ehDaExtensao(no.parentElement) && texto.length > 0 && texto.length < 120 &&
-          /vendid[oa]s?/i.test(texto)) {
-        const subtitulo = texto.match(SUBTITULO);
+      if (texto.length === 0 || texto.length >= 120 || !/vendid[oa]s?/i.test(texto)) return;
 
-        if (subtitulo) {
-          const valor = paraInteiro(subtitulo[3]);
+      const subtitulo = texto.match(SUBTITULO);
 
-          if (valor !== null && !doSubtitulo.some(function (achado) {
-            return achado.valor === valor && achado.aproximado === Boolean(subtitulo[2]);
-          })) {
-            doSubtitulo.push({
-              valor: valor,
-              // "+25 vendidos" quer dizer "mais de 25": o painel mostra "+25",
-              // nunca 25 como exato.
-              aproximado: Boolean(subtitulo[2]),
-              trecho: "«" + texto + "»"
-            });
-          }
-        }
+      if (subtitulo) {
+        const valor = paraInteiro(subtitulo[3]);
 
-        const leitura = lerRotulo(texto.toLowerCase(), "vendid");
-
-        if (leitura && leitura.valor !== undefined &&
-            !exatos.some(function (achado) { return achado.valor === leitura.valor; })) {
-          exatos.push({
-            valor: leitura.valor,
-            aproximado: false,
-            trecho: trechoDaLeitura(texto, leitura)
+        if (valor !== null && !doSubtitulo.some(function (achado) {
+          return achado.valor === valor && achado.aproximado === Boolean(subtitulo[2]);
+        })) {
+          doSubtitulo.push({
+            valor: valor,
+            // "+25 vendidos" quer dizer "mais de 25": o painel mostra "+25",
+            // nunca 25 como exato.
+            aproximado: Boolean(subtitulo[2]),
+            trecho: "«" + texto + "»"
           });
         }
       }
 
-      no = caminhante.nextNode();
-    }
+      const leitura = lerRotulo(texto.toLowerCase(), "vendid");
+
+      if (leitura && leitura.valor !== undefined &&
+          !exatos.some(function (achado) { return achado.valor === leitura.valor; })) {
+        exatos.push({
+          valor: leitura.valor,
+          aproximado: false,
+          trecho: trechoDaLeitura(texto, leitura)
+        });
+      }
+    });
 
     if (doSubtitulo.length === 1) return doSubtitulo[0];
 
@@ -986,6 +981,7 @@ var MLMetricsLeitura = (function () {
     trechoDaLeitura: trechoDaLeitura,
     aceitarNoDeTextoTecnico: aceitarNoDeTextoTecnico,
     ehDaExtensao: ehDaExtensao,
+    paraCadaTexto: paraCadaTexto,
     paginaMencionaVisita: paginaMencionaVisita,
     varrerPagina: varrerPagina,
     anotarImplausiveis: anotarImplausiveis,

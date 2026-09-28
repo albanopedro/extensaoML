@@ -629,6 +629,30 @@ const corpoNoscriptPublico = elementoDa("body", {}, [
 ]);
 testar("oculto: noscript nao credencia pagina publica", false, paginaMencionaVisita(documentoDa(corpoNoscriptPublico)));
 
+// paraCadaTexto (lote 37): o unico percurso da pagina. As guardas moram nele,
+// entao cada laco que o usa herda as duas sem poder esquecer uma.
+const corpoPercurso = elementoDa("body", {}, [
+  elementoDa("span", {}, [textoDa("primeiro")]),
+  elementoDa("script", {}, [textoDa("{\"visits\": 999}")]),
+  elementoDa("div", { id: "mlmetrics-painel" }, [textoDa("Visitas 359")]),
+  elementoDa("div", { id: "mlmetrics-aviso" }, [textoDa("1 anuncio atualizado")]),
+  elementoDa("span", {}, [textoDa("segundo")]),
+  elementoDa("span", {}, [textoDa("terceiro")])
+]);
+const vistosNoPercurso = [];
+MLMetricsLeitura.paraCadaTexto(documentoDa(corpoPercurso), function (no) {
+  vistosNoPercurso.push(no.nodeValue);
+});
+testar("paraCadaTexto: pula script, painel e aviso da extensao", "primeiro,segundo,terceiro",
+  vistosNoPercurso.join(","));
+
+const ateParar = [];
+MLMetricsLeitura.paraCadaTexto(documentoDa(corpoPercurso), function (no) {
+  ateParar.push(no.nodeValue);
+  return no.nodeValue === "segundo";
+});
+testar("paraCadaTexto: devolver true para o percurso ali", "primeiro,segundo", ateParar.join(","));
+
 console.log("");
 console.log("=== caminhoMascarado (#44/#50 - diagnostico sem dado pessoal) ===");
 testar("rota de sistema fica igual", "/anuncios/lista", caminhoMascarado("/anuncios/lista"));

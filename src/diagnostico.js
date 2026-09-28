@@ -30,16 +30,9 @@ var MLMetricsDiagnostico = (function () {
    */
   function coletarAmostras(doc) {
     const amostras = [];
-    const caminhante = doc.createTreeWalker(
-      doc.body,
-      NodeFilter.SHOW_TEXT,
-      MLMetricsLeitura.aceitarNoDeTextoTecnico
-    );
-
-    let no = caminhante.nextNode();
     const porMetrica = {};
 
-    while (no && amostras.length < 25) {
+    MLMetricsLeitura.paraCadaTexto(doc, function (no) {
       const texto = (no.nodeValue || "").trim();
       const minusculo = texto.toLowerCase();
 
@@ -53,8 +46,7 @@ var MLMetricsDiagnostico = (function () {
       const temVaga = metrica !== undefined && (porMetrica[metrica] || 0) < 12;
 
       // Texto longo e prosa mencionando a palavra, nao rotulo de metrica.
-      if (!MLMetricsLeitura.ehDaExtensao(no.parentElement) && temVaga &&
-          texto.length > 0 && texto.length < 120) {
+      if (temVaga && texto.length > 0 && texto.length < 120) {
         porMetrica[metrica] = (porMetrica[metrica] || 0) + 1;
 
         amostras.push({
@@ -66,8 +58,8 @@ var MLMetricsDiagnostico = (function () {
         });
       }
 
-      no = caminhante.nextNode();
-    }
+      return amostras.length >= 25;
+    });
 
     return amostras;
   }
@@ -102,26 +94,17 @@ var MLMetricsDiagnostico = (function () {
       achados.push(item);
     }
 
-    const caminhante = doc.createTreeWalker(
-      doc.body,
-      NodeFilter.SHOW_TEXT,
-      MLMetricsLeitura.aceitarNoDeTextoTecnico
-    );
-    let no = caminhante.nextNode();
-
-    while (no && achados.length < LIMITE_ITENS) {
+    MLMetricsLeitura.paraCadaTexto(doc, function (no, elemento) {
       const texto = (no.nodeValue || "").replace(/\s+/g, " ").trim();
-      const elemento = no.parentElement;
 
       // Rotulo de filtro e curto; frase longa com "ultimos 30 dias" e prosa.
-      if (!MLMetricsLeitura.ehDaExtensao(elemento) && texto.length > 0 && texto.length <= 80 &&
-          ehTextoDePeriodo(texto)) {
+      if (texto.length > 0 && texto.length <= 80 && ehTextoDePeriodo(texto)) {
         const opcao = elemento ? elemento.closest("option") : null;
         anotar(opcao ? "opcao de lista" : "texto", texto, estadoDoControle(elemento));
       }
 
-      no = caminhante.nextNode();
-    }
+      return achados.length >= LIMITE_ITENS;
+    });
 
     // Seletor de datas mostra o intervalo no VALOR de um campo, que o
     // TreeWalker nao ve. Campo escondido, de senha, e-mail ou telefone fica

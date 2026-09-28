@@ -666,6 +666,17 @@ e conferir 11 itens na mão.
 | Custo da leitura | A verificação no Edge passou a medir, **dentro do mundo isolado da extensão** (`rodarNaExtensao`), quanto custa ler uma página real salva em `teste/` — as que têm dado da cliente e ficam fora do repositório. Em 888 KB: **3 ms** no portão (`paginaMencionaVisita`, que roda a cada lote de mutações em qualquer página do ML) e **7 ms** na varredura completa (com um rótulo plantado, já que a página salva é vitrine). Limites de 100 ms e 500 ms, para pegar regressão grande sem falhar em máquina ocupada. Sem página salva, o caso é **pulado**, não falha. → **23/23**. |
 | Mensagem pronta | `MENSAGEM-CLIENTE.md`: o texto para mandar junto com o zip (instalar em 4 passos, e depois diagnóstico + conferência dos 3 anúncios), mais a lista do que precisa voltar. Tira o atrito do passo que está travando o projeto. |
 
+### Lote 37 — um percurso só da página (28/09/2026)
+
+Pedido do Pedro. O JS de `src/` foi de 3.868 para **3.847 linhas**.
+
+| Item | O que foi feito |
+|---|---|
+| `paraCadaTexto(doc, visitar)` | Mora no `leitura.js` e é o único `createTreeWalker` do projeto. Tem as duas guardas que todo percurso precisa: o filtro técnico (script, style, template, noscript, `[hidden]`) e nada do que a extensão desenhou (`ehDaExtensao`). Devolver `true` em `visitar` para o percurso ali. |
+| Quem usa | `paginaMencionaVisita`, `varrerPagina` e `vendidosDaPagina` (leitura) e `coletarAmostras` e `coletarTextosDePeriodo` (diagnóstico). Eram 5 laços montados à mão, cada um com a própria cópia da guarda. O de `varrerPagina` ficou com retornos antecipados, um nível de aninhamento a menos. |
+| Comportamento | Igual. Os limites (25 amostras, 20 períodos, parar na primeira "visita") viraram o `return true` do `visitar`. Custo na página real salva: igual (3 ms no portão, 7 ms na varredura). |
+| Testes | Harness +2 → **316/316** (pula script, painel e aviso; `true` para o percurso). Reprova provada: sem a guarda da extensão no helper, **7 casos falham**, espalhados pelos cinco usos. Navegador **71/71**, Edge **30/30**. Versão continua 0.2.7. |
+
 ### Lote 36 — plano B igual ao service worker + helpers de storage (28/09/2026)
 
 Pedido do Pedro. O JS de `src/` foi de 3.941 para **3.868 linhas**. Todo acesso ao
@@ -690,7 +701,7 @@ da nova e comparou só o código. As únicas diferenças são as da linha "Dupli
 | Comentários | Saiu a **história** ("antes era X", "no lote N mudou"), que já mora neste arquivo e no git. Ficou o **porquê atual** de cada regra. Tudo sem acento, como antes. |
 | Duplicações | `extensaoViva()` era idêntica no `coletor.js` e no `content.js` e agora mora só no `gravacao.js` (o único arquivo carregado nos dois lados). `ehDaExtensao()` + `SELETOR_DA_EXTENSAO` no `leitura.js` trocam 7 cópias de `closest("#mlmetrics-painel, #mlmetrics-aviso")`. O `calculo.js` usa o `PADRAO_CODIGO` do `leitura.js`, em vez de uma cópia. O `content.js` chama `removerPainel()` onde o repetia. |
 | Testes | O harness passa `MLMetricsLeitura` para o `calculo.js` e ganhou sozinho o caso de ordem do manifest → **307/307**. Navegador **71/71**, Edge **30/30** (com `--extensao=` apontando para a pasta). `manifest.json` continua **0.2.7**. |
-| Próximos | Plano B e helper de storage feitos no lote 36. Falta: TreeWalker único e remover a busca automática desligada (decisão do Pedro). |
+| Próximos | Plano B e helper de storage feitos no lote 36; TreeWalker único no lote 37. Falta só remover a busca automática desligada (decisão do Pedro). |
 
 ### Lote 33 — venda arredondada vira piso, não silêncio (25/09/2026)
 
@@ -932,6 +943,7 @@ paramos.
 | 33 — Venda arredondada como piso | ✅ feito | 25/09/2026 | Anúncio com "Novo \| +25 vendidos" ficava sem painel. `vendidosDaPagina` passou a usar o subtítulo (condição + vendidos) como âncora — o que separa o número do anúncio dos "+N" das vitrines — e o painel mostra "+25" e "a partir de R$ …". "+10mil" continua fora. Harness **306/306**, navegador **71/71**, Edge **30/30**. `manifest.json` → **0.2.7**. |
 | 35 — Enxugar comentários | ✅ feito | 28/09/2026 | Pedido do Pedro. Comentários só com o porquê atual. `extensaoViva`, `ehDaExtensao` e `PADRAO_CODIGO` num lugar só. JS de 4.737 → 3.941 linhas, código comparado sem comentários: só as mudanças pretendidas. Harness **307/307**, navegador **71/71**, Edge **30/30**. Versão continua 0.2.7. |
 | 36 — Plano B = SW + storage | ✅ feito | 28/09/2026 | Pedido do Pedro. A gravação completa (`gravarNaFila`) e os helpers `lerStorage`/`gravarStorage`/`alterarStorage` ficam no `gravacao.js`, e SW, aba e popup usam os mesmos. Fecha a fila do plano B que travava com leitura malformada. JS de 3.941 → 3.868 linhas. Harness **314/314**, navegador **71/71**, Edge **30/30**. |
+| 37 — Percurso único | ✅ feito | 28/09/2026 | Pedido do Pedro. `paraCadaTexto` no `leitura.js` substitui os 5 TreeWalkers e carrega as guardas (filtro técnico + nada da extensão). JS de 3.868 → 3.847 linhas. Harness **316/316**, navegador **71/71**, Edge **30/30**. |
 | 34 — Exibir o histórico | ⬜ a fazer | | Vendas/mês e faturamento/mês no painel. Depende da conferência e do #47 (total ou recorte muda a conta). |
 | ★ Capturar tela real + conferência | ⬜ a fazer | | Cliente, com a 0.2.7: "Copiar diagnóstico" em "Minhas publicações" e passo 7 do guia. |
 | 23b — Período no rastro | ⬜ a fazer | | #47: com o `telaAtual.periodo` da tela real, guardar o período junto do rastro. |
