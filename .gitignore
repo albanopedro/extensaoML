@@ -14,3 +14,7 @@ dist/
 diagnostico*.json
 diagnostico*.txt
 conferencia*.txt
+# O registro de trabalho do projeto (auditorias, lotes, pendencias) fica so
+# nesta maquina: tem detalhes da cliente e do andamento que nao sao para o
+# repositorio publico.
+contexto.md
